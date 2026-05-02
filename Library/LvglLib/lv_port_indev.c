@@ -85,6 +85,8 @@ static void keypad_read(lv_indev_t * indev_drv, lv_indev_data_t * data)
   EFI_KEY_DATA                       KeyData;
   UINT32                             KeyShift;
 
+  data->key = 0;
+
   Status = gBS->HandleProtocol (gST->ConsoleInHandle, &gEfiSimpleTextInputExProtocolGuid, (VOID **)&TxtInEx);
   Status = TxtInEx->ReadKeyStrokeEx (TxtInEx, &KeyData);
   if (!EFI_ERROR (Status)) {
@@ -499,6 +501,7 @@ void lv_uefi_keypad_drain(void)
   while ((Indev = lv_indev_get_next (Indev)) != NULL) {
     if (lv_indev_get_type (Indev) == LV_INDEV_TYPE_KEYPAD) {
       Indev->keypad.last_state = LV_INDEV_STATE_RELEASED;
+      Indev->keypad.last_key   = 0;
     }
   }
 }
