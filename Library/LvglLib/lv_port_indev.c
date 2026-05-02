@@ -197,7 +197,7 @@ lv_indev_t * lv_uefi_keyboard_create(void)
 
 EFI_STATUS
 EFIAPI
-GetXY (
+GetXYZ (
   lv_indev_t * indev_drv
   )
 {
@@ -226,11 +226,8 @@ GetXY (
       }
       mLvglUefiMouse.LeftButton = AbsState.ActiveButtons & BIT0;
 
-      {
-        INT64 zDelta = (INT64)AbsState.CurrentZ - (INT64)mLvglUefiMouse.LastAbsZ;
-        mLvglUefiMouse.LastAbsZ = AbsState.CurrentZ;
-        mLvglUefiMouse.WheelDelta += (INT32)zDelta;
-      }
+      mLvglUefiMouse.WheelDelta += (INT32)(AbsState.CurrentZ - mLvglUefiMouse.LastAbsZ);
+      mLvglUefiMouse.LastAbsZ = AbsState.CurrentZ;
 
       return EFI_SUCCESS;
     }
@@ -352,7 +349,7 @@ StartInit:
 static void mouse_read(lv_indev_t * indev_drv, lv_indev_data_t * data)
 {
 
-  GetXY(indev_drv);
+  GetXYZ(indev_drv);
   data->point.x = mLvglUefiMouse.LastCursorX;
   data->point.y = mLvglUefiMouse.LastCursorY;
   if (mLvglUefiMouse.LeftButton) {
