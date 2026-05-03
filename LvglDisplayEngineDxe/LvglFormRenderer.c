@@ -12,6 +12,7 @@
 **/
 
 #include "LvglFormRenderer.h"
+#include <LvglTheme.h>
 
 STATIC LVGL_FORM_SESSION  mSession;
 STATIC BOOLEAN            mLvglReady = FALSE;
@@ -569,7 +570,7 @@ ShowPopup (
   Overlay = lv_obj_create (lv_screen_active ());
   lv_obj_set_size (Overlay, LV_PCT (100), LV_PCT (100));
   lv_obj_set_style_bg_color (Overlay, lv_color_black (), 0);
-  lv_obj_set_style_bg_opa (Overlay, LV_OPA_50, 0);
+  lv_obj_set_style_bg_opa (Overlay, THEME_OVERLAY_OPA, 0);
   lv_obj_set_style_border_width (Overlay, 0, 0);
   lv_obj_set_style_pad_all (Overlay, 0, 0);
   lv_obj_set_flex_flow (Overlay, LV_FLEX_FLOW_COLUMN);
@@ -583,26 +584,26 @@ ShowPopup (
   lv_obj_set_width (Card, LV_PCT (50));
   lv_obj_set_height (Card, LV_SIZE_CONTENT);
   lv_obj_set_flex_flow (Card, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_style_pad_all (Card, 16, 0);
-  lv_obj_set_style_pad_row (Card, 10, 0);
-  lv_obj_set_style_bg_color (Card, lv_color_hex (0x2A2A4A), 0);
-  lv_obj_set_style_radius (Card, 8, 0);
+  lv_obj_set_style_pad_all (Card, THEME_PAD_DIALOG, 0);
+  lv_obj_set_style_pad_row (Card, THEME_PAD_DIALOG_ROW_GAP, 0);
+  lv_obj_set_style_bg_color (Card, lv_color_hex (THEME_COLOR_BG_DIALOG), 0);
+  lv_obj_set_style_radius (Card, THEME_RADIUS, 0);
   lv_obj_set_style_border_width (Card, 0, 0);
 
   TitleLbl = lv_label_create (Card);
   lv_label_set_text (TitleLbl, Title);
-  lv_obj_set_style_text_font (TitleLbl, &lv_font_montserrat_16, 0);
-  lv_obj_set_style_text_color (TitleLbl, lv_color_white (), 0);
+  lv_obj_set_style_text_font (TitleLbl, THEME_FONT_POPUP, 0);
+  lv_obj_set_style_text_color (TitleLbl, lv_color_hex (THEME_COLOR_TEXT_TITLE), 0);
 
   Sep = lv_obj_create (Card);
   lv_obj_set_size (Sep, LV_PCT (100), 1);
-  lv_obj_set_style_bg_color (Sep, lv_color_hex (0x555580), 0);
+  lv_obj_set_style_bg_color (Sep, lv_color_hex (THEME_COLOR_BG_SEPARATOR), 0);
   lv_obj_set_style_border_width (Sep, 0, 0);
   lv_obj_set_style_pad_all (Sep, 0, 0);
 
   MsgLbl = lv_label_create (Card);
   lv_label_set_text (MsgLbl, ShowDiscard ? "You have unsaved changes." : "Save the current settings?");
-  lv_obj_set_style_text_color (MsgLbl, lv_color_hex (0xCCCCCC), 0);
+  lv_obj_set_style_text_color (MsgLbl, lv_color_hex (THEME_COLOR_TEXT_POPUP), 0);
 
   BtnRow = lv_obj_create (Card);
   lv_obj_set_size (BtnRow, LV_PCT (100), LV_SIZE_CONTENT);
@@ -611,7 +612,7 @@ ShowPopup (
   lv_obj_set_style_pad_all (BtnRow, 0, 0);
   lv_obj_set_style_border_width (BtnRow, 0, 0);
   lv_obj_set_style_bg_opa (BtnRow, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_pad_column (BtnRow, 8, 0);
+  lv_obj_set_style_pad_column (BtnRow, THEME_PAD_DIALOG_COL_GAP, 0);
 
   //
   // Confirm (Save / Load) button.
@@ -991,9 +992,9 @@ CreateSubtitleWidget (
 
   Label = lv_label_create (Parent);
   lv_label_set_text (Label, Text);
-  lv_obj_set_style_text_font (Label, &lv_font_montserrat_16, 0);
-  lv_obj_set_style_text_color (Label, lv_palette_main (LV_PALETTE_BLUE), 0);
-  lv_obj_set_style_pad_top (Label, 8, 0);
+  lv_obj_set_style_text_font (Label, THEME_FONT_BODY, 0);
+  lv_obj_set_style_text_color (Label, lv_palette_main (THEME_ACCENT_PALETTE), 0);
+  lv_obj_set_style_pad_top (Label, THEME_PAD_LABEL_TOP, 0);
 
   FreePool (Text);
 }
@@ -1086,7 +1087,7 @@ CreateNumericWidget (
   Row = lv_obj_create (Parent);
   lv_obj_set_size (Row, LV_PCT (100), LV_SIZE_CONTENT);
   lv_obj_set_flex_flow (Row, LV_FLEX_FLOW_ROW);
-  lv_obj_set_style_pad_all (Row, 4, 0);
+  lv_obj_set_style_pad_all (Row, THEME_PAD_ROW, 0);
   lv_obj_set_style_border_width (Row, 0, 0);
   lv_obj_set_style_bg_opa (Row, LV_OPA_TRANSP, 0);
 
@@ -1172,7 +1173,7 @@ CreateOneOfWidget (
   Row = lv_obj_create (Parent);
   lv_obj_set_size (Row, LV_PCT (100), LV_SIZE_CONTENT);
   lv_obj_set_flex_flow (Row, LV_FLEX_FLOW_ROW);
-  lv_obj_set_style_pad_all (Row, 4, 0);
+  lv_obj_set_style_pad_all (Row, THEME_PAD_ROW, 0);
   lv_obj_set_style_border_width (Row, 0, 0);
   lv_obj_set_style_bg_opa (Row, LV_OPA_TRANSP, 0);
 
@@ -1332,13 +1333,13 @@ CreateOrderedListWidget (
   Panel = lv_obj_create (Parent);
   lv_obj_set_size (Panel, LV_PCT (100), LV_SIZE_CONTENT);
   lv_obj_set_flex_flow (Panel, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_style_pad_all (Panel, 4, 0);
+  lv_obj_set_style_pad_all (Panel, THEME_PAD_ROW, 0);
   lv_obj_set_style_border_width (Panel, 0, 0);
   lv_obj_set_style_bg_opa (Panel, LV_OPA_TRANSP, 0);
 
   Header = lv_label_create (Panel);
   lv_label_set_text (Header, PromptText != NULL ? PromptText : "Ordered List");
-  lv_obj_set_style_text_font (Header, &lv_font_montserrat_16, 0);
+  lv_obj_set_style_text_font (Header, THEME_FONT_BODY, 0);
 
   for (i = 0; i < ActiveCount; i++) {
     Value = GetArrayData (Statement->CurrentValue.Buffer, ValueType, i);
@@ -1388,7 +1389,7 @@ CreateOrderedListWidget (
     Row = lv_obj_create (Panel);
     lv_obj_set_size (Row, LV_PCT (100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow (Row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_all (Row, 2, 0);
+    lv_obj_set_style_pad_all (Row, THEME_PAD_ROW_TIGHT, 0);
     lv_obj_set_style_border_width (Row, 0, 0);
     lv_obj_set_style_bg_opa (Row, LV_OPA_TRANSP, 0);
 
@@ -1474,7 +1475,7 @@ CreateStringWidget (
   Row = lv_obj_create (Parent);
   lv_obj_set_size (Row, LV_PCT (100), LV_SIZE_CONTENT);
   lv_obj_set_flex_flow (Row, LV_FLEX_FLOW_ROW);
-  lv_obj_set_style_pad_all (Row, 4, 0);
+  lv_obj_set_style_pad_all (Row, THEME_PAD_ROW, 0);
   lv_obj_set_style_border_width (Row, 0, 0);
   lv_obj_set_style_bg_opa (Row, LV_OPA_TRANSP, 0);
 
@@ -1706,10 +1707,10 @@ LvglRenderForm (
   // Create a new screen.
   //
   mSession.Screen = lv_obj_create (NULL);
-  lv_obj_set_style_bg_color (mSession.Screen, lv_color_hex (0x1A1A2E), 0);
+  lv_obj_set_style_bg_color (mSession.Screen, lv_color_hex (THEME_COLOR_BG_SCREEN), 0);
   lv_obj_set_flex_flow (mSession.Screen, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_style_pad_all (mSession.Screen, 16, 0);
-  lv_obj_set_style_pad_row (mSession.Screen, 6, 0);
+  lv_obj_set_style_pad_all (mSession.Screen, THEME_PAD_SCREEN, 0);
+  lv_obj_set_style_pad_row (mSession.Screen, THEME_PAD_SCREEN_ROW_GAP, 0);
 
   //
   // Title bar.
@@ -1722,8 +1723,8 @@ LvglRenderForm (
 
   TitleLabel = lv_label_create (mSession.Screen);
   lv_label_set_text (TitleLabel, TitleStr8 != NULL ? TitleStr8 : "Setup");
-  lv_obj_set_style_text_font (TitleLabel, &lv_font_montserrat_20, 0);
-  lv_obj_set_style_text_color (TitleLabel, lv_color_white (), 0);
+  lv_obj_set_style_text_font (TitleLabel, THEME_FONT_TITLE, 0);
+  lv_obj_set_style_text_color (TitleLabel, lv_color_hex (THEME_COLOR_TEXT_TITLE), 0);
   if (TitleStr8 != NULL) {
     FreePool (TitleStr8);
   }
@@ -1735,10 +1736,10 @@ LvglRenderForm (
   lv_obj_set_size (ContentPanel, LV_PCT (100), LV_SIZE_CONTENT);
   lv_obj_set_flex_flow (ContentPanel, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_flex_grow (ContentPanel, 1);
-  lv_obj_set_style_pad_all (ContentPanel, 8, 0);
-  lv_obj_set_style_pad_row (ContentPanel, 4, 0);
-  lv_obj_set_style_bg_color (ContentPanel, lv_color_hex (0x16213E), 0);
-  lv_obj_set_style_radius (ContentPanel, 8, 0);
+  lv_obj_set_style_pad_all (ContentPanel, THEME_PAD_PANEL, 0);
+  lv_obj_set_style_pad_row (ContentPanel, THEME_PAD_PANEL_ROW_GAP, 0);
+  lv_obj_set_style_bg_color (ContentPanel, lv_color_hex (THEME_COLOR_BG_PANEL), 0);
+  lv_obj_set_style_radius (ContentPanel, THEME_RADIUS, 0);
 
   //
   // Create a navigation group and bind keyboard input devices.
