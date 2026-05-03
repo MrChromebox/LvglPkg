@@ -12,6 +12,7 @@
 **/
 
 #include "LvglFormRenderer.h"
+#include "LvglAptioChrome.h"
 #include <LvglTheme.h>
 
 STATIC LVGL_FORM_SESSION  mSession;
@@ -206,6 +207,40 @@ typedef struct {
 //
 
 /**
+  Verify that Statement is still present in the current FormData's
+  StatementListHead. LVGL event callbacks can fire after the form has been
+  rebuilt (e.g. while a previous form's widgets are still being torn down),
+  in which case Ctx->Statement is dangling. Assigning a stale pointer to
+  USER_INPUT.SelectedStatement causes SetupBrowserDxe's GetBrowserStatement
+  to return NULL and assert at Presentation.c(1619).
+**/
+STATIC
+BOOLEAN
+IsStatementInCurrentForm (
+  IN FORM_DISPLAY_ENGINE_STATEMENT  *Statement
+  )
+{
+  LIST_ENTRY                     *Link;
+  FORM_DISPLAY_ENGINE_STATEMENT  *Walk;
+
+  if ((Statement == NULL) || (mSession.FormData == NULL)) {
+    return FALSE;
+  }
+
+  for (Link = mSession.FormData->StatementListHead.ForwardLink;
+       Link != &mSession.FormData->StatementListHead;
+       Link = Link->ForwardLink)
+  {
+    Walk = FORM_DISPLAY_ENGINE_STATEMENT_FROM_LINK (Link);
+    if (Walk == Statement) {
+      return TRUE;
+    }
+  }
+
+  return FALSE;
+}
+
+/**
   Generic click handler — records the statement selection and requests exit.
 **/
 STATIC
@@ -218,6 +253,10 @@ OnStatementClicked (
 
   Ctx = (LVGL_STATEMENT_CONTEXT *)lv_event_get_user_data (Event);
   if (Ctx == NULL || mSession.UserInput == NULL) {
+    return;
+  }
+
+  if (!IsStatementInCurrentForm (Ctx->Statement)) {
     return;
   }
 
@@ -314,6 +353,11 @@ OnStringReady (
     return;
   }
 
+  if (!IsStatementInCurrentForm (Ctx->Statement)) {
+    FreePool (PoolBuf);
+    return;
+  }
+
   mSession.UserInput->SelectedStatement       = Ctx->Statement;
   mSession.UserInput->InputValue.Type         = EFI_IFR_TYPE_STRING;
   mSession.UserInput->InputValue.Buffer       = (UINT8 *)PoolBuf;
@@ -337,6 +381,10 @@ OnCheckboxChanged (
 
   Ctx = (LVGL_STATEMENT_CONTEXT *)lv_event_get_user_data (Event);
   if (Ctx == NULL || mSession.UserInput == NULL) {
+    return;
+  }
+
+  if (!IsStatementInCurrentForm (Ctx->Statement)) {
     return;
   }
 
@@ -367,6 +415,10 @@ OnDropdownChanged (
 
   Ctx = (LVGL_STATEMENT_CONTEXT *)lv_event_get_user_data (Event);
   if (Ctx == NULL || mSession.UserInput == NULL) {
+    return;
+  }
+
+  if (!IsStatementInCurrentForm (Ctx->Statement)) {
     return;
   }
 
@@ -440,6 +492,10 @@ OnOrderedListMove (
   }
 
   Statement = MoveCtx->Statement;
+  if (!IsStatementInCurrentForm (Statement)) {
+    return;
+  }
+
   i = MoveCtx->Index;
   j = (UINTN)((INT32)i + MoveCtx->Direction);
 
@@ -853,6 +909,10 @@ OnNumericReady (
     return;
   }
 
+  if (!IsStatementInCurrentForm (Ctx->Statement)) {
+    return;
+  }
+
   Ta    = lv_event_get_target_obj (Event);
   Text  = lv_textarea_get_text (Ta);
   Value = AsciiDecimalToUint64 (Text);
@@ -971,6 +1031,79 @@ AddToNavGroup (
 }
 
 //
+// ---- Row styling: Aptio-style focus highlight ----
+//
+// All statement rows share one visual: a flush, full-width container
+// with a subtle bottom separator. The focused row turns solid blue
+// (THEME_COLOR_HIGHLIGHT_ROW) with white text.
+//
+
+STATIC
+VOID
+StyleRow (
+  lv_obj_t  *Row
+  )
+{
+  lv_obj_set_size (Row, LV_PCT (100), LV_SIZE_CONTENT);
+  lv_obj_set_flex_flow (Row, LV_FLEX_FLOW_ROW);
+  lv_obj_clear_flag (Row, LV_OBJ_FLAG_SCROLLABLE);
+
+  // default: dark capsule, slightly translucent so the gradient shows
+  lv_obj_set_style_bg_color (Row, lv_color_hex (0x0A1428), 0);
+  lv_obj_set_style_bg_opa (Row, LV_OPA_80, 0);
+  lv_obj_set_style_border_width (Row, 0, 0);
+  lv_obj_set_style_radius (Row, 4, 0);
+  lv_obj_set_style_pad_left (Row, 16, 0);
+  lv_obj_set_style_pad_right (Row, 16, 0);
+  lv_obj_set_style_pad_top (Row, 10, 0);
+  lv_obj_set_style_pad_bottom (Row, 10, 0);
+  lv_obj_set_style_text_color (Row, lv_color_hex (0xE6F0FF), 0);
+  lv_obj_set_style_shadow_width (Row, 0, 0);
+
+  // focused: solid bright blue + white text
+  lv_obj_set_style_bg_color (Row, lv_color_hex (THEME_COLOR_HIGHLIGHT_ROW), LV_STATE_FOCUSED);
+  lv_obj_set_style_bg_opa (Row, LV_OPA_COVER, LV_STATE_FOCUSED);
+  lv_obj_set_style_text_color (Row, lv_color_hex (0xFFFFFF), LV_STATE_FOCUSED);
+  lv_obj_set_style_shadow_width (Row, 0, LV_STATE_FOCUSED);
+}
+
+STATIC
+VOID
+OnRowFocusChange (
+  lv_event_t  *Event
+  )
+{
+  lv_obj_t         *Row;
+  lv_event_code_t  Code;
+
+  Row  = (lv_obj_t *)lv_event_get_user_data (Event);
+  Code = lv_event_get_code (Event);
+  if (Row == NULL) {
+    return;
+  }
+  if (Code == LV_EVENT_FOCUSED) {
+    lv_obj_add_state (Row, LV_STATE_FOCUSED);
+  } else if (Code == LV_EVENT_DEFOCUSED) {
+    lv_obj_remove_state (Row, LV_STATE_FOCUSED);
+  }
+}
+
+//
+// Bind the inner navigable widget's focus events to a wrapping Row so
+// the whole row paints highlighted, not just the inner control.
+//
+STATIC
+VOID
+BindRowFocus (
+  lv_obj_t  *Widget,
+  lv_obj_t  *Row
+  )
+{
+  lv_obj_add_event_cb (Widget, OnRowFocusChange, LV_EVENT_FOCUSED, Row);
+  lv_obj_add_event_cb (Widget, OnRowFocusChange, LV_EVENT_DEFOCUSED, Row);
+}
+
+//
 // ---- Widget builders ----
 //
 
@@ -1031,13 +1164,20 @@ CreateCheckboxWidget (
   )
 {
   CHAR8                   *Text;
+  lv_obj_t                *Row;
   lv_obj_t                *Cb;
   LVGL_STATEMENT_CONTEXT  *Ctx;
 
   Text = GetPromptUtf8 (Statement, HiiHandle);
 
-  Cb = lv_checkbox_create (Parent);
+  Row = lv_obj_create (Parent);
+  StyleRow (Row);
+
+  Cb = lv_checkbox_create (Row);
   lv_checkbox_set_text (Cb, Text != NULL ? Text : "Checkbox");
+  lv_obj_set_flex_grow (Cb, 1);
+  lv_obj_set_style_bg_opa (Cb, LV_OPA_TRANSP, LV_PART_MAIN);
+  lv_obj_set_style_border_width (Cb, 0, LV_PART_MAIN);
 
   if (Statement->CurrentValue.Value.b) {
     lv_obj_add_state (Cb, LV_STATE_CHECKED);
@@ -1055,6 +1195,7 @@ CreateCheckboxWidget (
   }
 
   AddToNavGroup (Group, Cb, Ctx);
+  BindRowFocus (Cb, Row);
 
   if (Text != NULL) {
     FreePool (Text);
@@ -1085,11 +1226,7 @@ CreateNumericWidget (
   Text = GetPromptUtf8 (Statement, HiiHandle);
 
   Row = lv_obj_create (Parent);
-  lv_obj_set_size (Row, LV_PCT (100), LV_SIZE_CONTENT);
-  lv_obj_set_flex_flow (Row, LV_FLEX_FLOW_ROW);
-  lv_obj_set_style_pad_all (Row, THEME_PAD_ROW, 0);
-  lv_obj_set_style_border_width (Row, 0, 0);
-  lv_obj_set_style_bg_opa (Row, LV_OPA_TRANSP, 0);
+  StyleRow (Row);
 
   Label = lv_label_create (Row);
   lv_label_set_text (Label, Text != NULL ? Text : "Numeric");
@@ -1139,6 +1276,7 @@ CreateNumericWidget (
   }
 
   AddToNavGroup (Group, Ta, Ctx);
+  BindRowFocus (Ta, Row);
 
   if (Text != NULL) {
     FreePool (Text);
@@ -1171,11 +1309,7 @@ CreateOneOfWidget (
   Text = GetPromptUtf8 (Statement, HiiHandle);
 
   Row = lv_obj_create (Parent);
-  lv_obj_set_size (Row, LV_PCT (100), LV_SIZE_CONTENT);
-  lv_obj_set_flex_flow (Row, LV_FLEX_FLOW_ROW);
-  lv_obj_set_style_pad_all (Row, THEME_PAD_ROW, 0);
-  lv_obj_set_style_border_width (Row, 0, 0);
-  lv_obj_set_style_bg_opa (Row, LV_OPA_TRANSP, 0);
+  StyleRow (Row);
 
   Label = lv_label_create (Row);
   lv_label_set_text (Label, Text != NULL ? Text : "OneOf");
@@ -1264,6 +1398,7 @@ CreateOneOfWidget (
   }
 
   AddToNavGroup (Group, Dd, Ctx);
+  BindRowFocus (Dd, Row);
 
   if (Text != NULL) {
     FreePool (Text);
@@ -1473,11 +1608,7 @@ CreateStringWidget (
   Text = GetPromptUtf8 (Statement, HiiHandle);
 
   Row = lv_obj_create (Parent);
-  lv_obj_set_size (Row, LV_PCT (100), LV_SIZE_CONTENT);
-  lv_obj_set_flex_flow (Row, LV_FLEX_FLOW_ROW);
-  lv_obj_set_style_pad_all (Row, THEME_PAD_ROW, 0);
-  lv_obj_set_style_border_width (Row, 0, 0);
-  lv_obj_set_style_bg_opa (Row, LV_OPA_TRANSP, 0);
+  StyleRow (Row);
 
   Label = lv_label_create (Row);
   lv_label_set_text (Label, Text != NULL ? Text : "String");
@@ -1520,6 +1651,7 @@ CreateStringWidget (
   }
 
   AddToNavGroup (Group, Ta, Ctx);
+  BindRowFocus (Ta, Row);
 
   if (Text != NULL) {
     FreePool (Text);
@@ -1542,10 +1674,13 @@ CreateRefWidget (
 
   Text = GetPromptUtf8 (Statement, HiiHandle);
 
-  Btn   = lv_btn_create (Parent);
+  Btn = lv_btn_create (Parent);
+  StyleRow (Btn);
+  lv_obj_set_style_text_align (Btn, LV_TEXT_ALIGN_LEFT, 0);
+
   Label = lv_label_create (Btn);
   lv_label_set_text (Label, Text != NULL ? Text : "Goto");
-  lv_obj_set_width (Btn, LV_PCT (100));
+  lv_obj_align (Label, LV_ALIGN_LEFT_MID, 0, 0);
 
   if (Statement->Attribute & HII_DISPLAY_GRAYOUT) {
     lv_obj_add_state (Btn, LV_STATE_DISABLED);
@@ -1665,9 +1800,6 @@ LvglRenderForm (
   )
 {
   EFI_STATUS  Status;
-  CHAR16      *TitleStr16;
-  CHAR8       *TitleStr8;
-  lv_obj_t    *TitleLabel;
   lv_obj_t    *ContentPanel;
   extern BOOLEAN mTickSupport;
 
@@ -1694,6 +1826,12 @@ LvglRenderForm (
   gST->ConOut->EnableCursor (gST->ConOut, FALSE);
 
   //
+  // Tear down any chrome-owned timers from the previous form before we
+  // build a new one (LVGL timers are not children of the screen object).
+  //
+  AptioChromeTeardown ();
+
+  //
   // Set up session state.
   //
   ZeroMem (&mSession, sizeof (mSession));
@@ -1704,42 +1842,12 @@ LvglRenderForm (
   ZeroMem (UserInputData, sizeof (USER_INPUT));
 
   //
-  // Create a new screen.
+  // Create a new screen and the AMI Aptio-style chrome around it.
+  // AptioBuildChrome returns the inner content panel; form widgets are
+  // appended to that panel below.
   //
   mSession.Screen = lv_obj_create (NULL);
-  lv_obj_set_style_bg_color (mSession.Screen, lv_color_hex (THEME_COLOR_BG_SCREEN), 0);
-  lv_obj_set_flex_flow (mSession.Screen, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_style_pad_all (mSession.Screen, THEME_PAD_SCREEN, 0);
-  lv_obj_set_style_pad_row (mSession.Screen, THEME_PAD_SCREEN_ROW_GAP, 0);
-
-  //
-  // Title bar.
-  //
-  TitleStr16 = HiiGetString (FormData->HiiHandle, FormData->FormTitle, NULL);
-  TitleStr8  = Ucs2ToUtf8 (TitleStr16 != NULL ? TitleStr16 : L"Setup");
-  if (TitleStr16 != NULL) {
-    FreePool (TitleStr16);
-  }
-
-  TitleLabel = lv_label_create (mSession.Screen);
-  lv_label_set_text (TitleLabel, TitleStr8 != NULL ? TitleStr8 : "Setup");
-  lv_obj_set_style_text_font (TitleLabel, THEME_FONT_TITLE, 0);
-  lv_obj_set_style_text_color (TitleLabel, lv_color_hex (THEME_COLOR_TEXT_TITLE), 0);
-  if (TitleStr8 != NULL) {
-    FreePool (TitleStr8);
-  }
-
-  //
-  // Scrollable content area.
-  //
-  ContentPanel = lv_obj_create (mSession.Screen);
-  lv_obj_set_size (ContentPanel, LV_PCT (100), LV_SIZE_CONTENT);
-  lv_obj_set_flex_flow (ContentPanel, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_flex_grow (ContentPanel, 1);
-  lv_obj_set_style_pad_all (ContentPanel, THEME_PAD_PANEL, 0);
-  lv_obj_set_style_pad_row (ContentPanel, THEME_PAD_PANEL_ROW_GAP, 0);
-  lv_obj_set_style_bg_color (ContentPanel, lv_color_hex (THEME_COLOR_BG_PANEL), 0);
-  lv_obj_set_style_radius (ContentPanel, THEME_RADIUS, 0);
+  ContentPanel    = AptioBuildChrome (mSession.Screen, FormData);
 
   //
   // Create a navigation group and bind keyboard input devices.
@@ -1898,6 +2006,8 @@ LvglRendererCleanup (
   VOID
   )
 {
+  AptioChromeTeardown ();
+
   if (mSession.Group != NULL) {
     lv_group_delete (mSession.Group);
     mSession.Group = NULL;

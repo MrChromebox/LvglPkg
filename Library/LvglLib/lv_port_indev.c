@@ -346,8 +346,36 @@ StartInit:
 }
 
 
+//
+// Scroll amount in pixels per wheel detent. LVGL's built-in
+// indev_proc_pointer_diff path uses indev->scroll_limit (default 10px) but
+// only fires when pointer.last_pressed is set — i.e. after the user has
+// clicked or dragged once. We bypass that by directly scrolling the
+// nearest scrollable ancestor of the obj under the cursor.
+//
+#define LVGL_WHEEL_SCROLL_PIXELS  40
+
+static lv_obj_t * find_scrollable_at_point(lv_display_t * disp, lv_point_t * p)
+{
+  lv_obj_t *screen = lv_display_get_screen_active(disp);
+  if (screen == NULL) return NULL;
+
+  lv_obj_t *hit = lv_indev_search_obj(screen, p);
+  if (hit == NULL) return NULL;
+
+  for (lv_obj_t *o = hit; o != NULL; o = lv_obj_get_parent(o)) {
+    if (lv_obj_has_flag(o, LV_OBJ_FLAG_SCROLLABLE) &&
+        lv_obj_get_scroll_top(o) + lv_obj_get_scroll_bottom(o) > 0)
+    {
+      return o;
+    }
+  }
+  return NULL;
+}
+
 static void mouse_read(lv_indev_t * indev_drv, lv_indev_data_t * data)
 {
+  int wheel_step = 0;
 
   GetXYZ(indev_drv);
   data->point.x = mLvglUefiMouse.LastCursorX;
@@ -359,13 +387,27 @@ static void mouse_read(lv_indev_t * indev_drv, lv_indev_data_t * data)
   }
 
   if (mLvglUefiMouse.WheelDelta >= LVGL_WHEEL_COUNTS_PER_DETENT) {
-    data->enc_diff = 1;
+    wheel_step = 1;
     mLvglUefiMouse.WheelDelta -= LVGL_WHEEL_COUNTS_PER_DETENT;
   } else if (mLvglUefiMouse.WheelDelta <= -LVGL_WHEEL_COUNTS_PER_DETENT) {
-    data->enc_diff = -1;
+    wheel_step = -1;
     mLvglUefiMouse.WheelDelta += LVGL_WHEEL_COUNTS_PER_DETENT;
-  } else {
-    data->enc_diff = 0;
+  }
+
+  data->enc_diff = 0;
+
+  if (wheel_step != 0) {
+    lv_display_t *disp = lv_indev_get_display(indev_drv);
+    lv_point_t p = { (int32_t)data->point.x, (int32_t)data->point.y };
+    lv_obj_t *target = find_scrollable_at_point(disp, &p);
+    if (target != NULL) {
+      lv_obj_scroll_by_bounded(
+        target,
+        0,
+        wheel_step * LVGL_WHEEL_SCROLL_PIXELS,
+        LV_ANIM_OFF
+        );
+    }
   }
 }
 

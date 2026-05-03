@@ -57,4 +57,31 @@
 #define THEME_RADIUS              8
 #define THEME_OVERLAY_OPA         LV_OPA_50
 
+//
+// Aptio-style chrome (header / subtitle / footer / wallpaper).
+// Used by LvglDisplayEngineDxe/LvglAptioChrome.c.
+//
+#define THEME_COLOR_HEADER_BG_TOP     0x0A1428
+#define THEME_COLOR_HEADER_BG_BOTTOM  0x1F3A6E
+#define THEME_COLOR_HEADER_TEXT       0xFFFFFF
+#define THEME_COLOR_HEADER_DIM        0xA0B8D8
+#define THEME_COLOR_SUBTITLE_BG       0x16213E
+#define THEME_COLOR_SUBTITLE_TEXT     0xCFE3FF
+#define THEME_COLOR_FOOTER_BG         0x0E1A33
+#define THEME_COLOR_FOOTER_TEXT       0xCFE3FF
+#define THEME_COLOR_FOOTER_DIM        0x7A8FB5
+#define THEME_COLOR_HIGHLIGHT_ROW     0x1E66D4
+
+#define THEME_HEADER_HEIGHT       44
+#define THEME_SUBTITLE_HEIGHT     28
+#define THEME_FOOTER_HEIGHT       32
+
+//
+// Static strings shown in the chrome (no SMBIOS lookup yet).
+//
+#define APTIO_HEADER_TITLE        "EDK II Boot Manager"
+#define APTIO_HEADER_VENDOR       "UEFI v2.90  |  EDK II"
+#define APTIO_FOOTER_NAV_HINTS    LV_SYMBOL_UP LV_SYMBOL_DOWN " Select   Enter Confirm   Esc Exit   F9 Defaults   F10 Save"
+#define APTIO_FOOTER_SYSINFO      "QEMU x86_64  |  OVMF"
+
 #endif // LVGL_THEME_H_
