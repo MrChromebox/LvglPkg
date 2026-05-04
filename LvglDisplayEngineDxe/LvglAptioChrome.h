@@ -48,4 +48,14 @@ AptioChromeTeardown (
   VOID
   );
 
+/**
+  Update the help pane text. Caller-owned UTF-8 string is copied by LVGL.
+  Pass NULL or "" to clear.
+**/
+VOID
+EFIAPI
+AptioSetHelpText (
+  IN CONST CHAR8  *Utf8
+  );
+
 #endif // LVGL_APTIO_CHROME_H_

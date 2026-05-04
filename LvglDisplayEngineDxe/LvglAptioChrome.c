@@ -7,6 +7,8 @@
 
 #include "LvglAptioChrome.h"
 #include <LvglTheme.h>
+#include <Library/BaseLib.h>
+#include <Library/DebugLib.h>
 #include <Library/UefiRuntimeServicesTableLib.h>
 #include <Library/HiiLib.h>
 #include <Library/MemoryAllocationLib.h>
@@ -14,6 +16,7 @@
 
 STATIC lv_obj_t   *mClockLabel = NULL;
 STATIC lv_timer_t *mClockTimer = NULL;
+STATIC lv_obj_t   *mHelpLabel  = NULL;
 
 /**
   UCS-2 → UTF-8 (caller frees). Local copy to avoid cross-file linkage.
@@ -194,7 +197,76 @@ BuildSubtitleBar (
 }
 
 /**
-  Build the footer hint bar.
+  Append a single chip (label-on-pill) to the hotkey bar.
+**/
+STATIC
+VOID
+AddHotKeyChip (
+  IN lv_obj_t       *Parent,
+  IN CONST CHAR8    *KeyText,
+  IN CONST CHAR8    *LabelText
+  )
+{
+  lv_obj_t  *Chip;
+  lv_obj_t  *KeyLbl;
+  lv_obj_t  *DescLbl;
+
+  Chip = lv_obj_create (Parent);
+  lv_obj_remove_style_all (Chip);
+  lv_obj_set_size (Chip, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_set_flex_flow (Chip, LV_FLEX_FLOW_ROW);
+  lv_obj_set_style_pad_left (Chip, 8, 0);
+  lv_obj_set_style_pad_right (Chip, 8, 0);
+  lv_obj_set_style_pad_top (Chip, 4, 0);
+  lv_obj_set_style_pad_bottom (Chip, 4, 0);
+  lv_obj_set_style_pad_column (Chip, 6, 0);
+  lv_obj_set_style_radius (Chip, 4, 0);
+  lv_obj_set_style_bg_color (Chip, lv_color_hex (THEME_COLOR_BG_PANEL), 0);
+  lv_obj_set_style_bg_opa (Chip, LV_OPA_COVER, 0);
+  lv_obj_clear_flag (Chip, LV_OBJ_FLAG_SCROLLABLE);
+
+  KeyLbl = lv_label_create (Chip);
+  lv_label_set_text (KeyLbl, KeyText);
+  lv_obj_set_style_text_font (KeyLbl, THEME_FONT_BODY, 0);
+  lv_obj_set_style_text_color (KeyLbl, lv_color_hex (THEME_COLOR_ACCENT_HOVER), 0);
+
+  DescLbl = lv_label_create (Chip);
+  lv_label_set_text (DescLbl, LabelText);
+  lv_obj_set_style_text_font (DescLbl, THEME_FONT_BODY, 0);
+  lv_obj_set_style_text_color (DescLbl, lv_color_hex (THEME_COLOR_FOOTER_TEXT), 0);
+}
+
+/**
+  Map an EFI scan code to a short chip label like "F9".
+  Returns NULL if unsupported (chip is skipped).
+**/
+STATIC
+CONST CHAR8 *
+ScanCodeToChipKey (
+  IN UINT16  ScanCode
+  )
+{
+  STATIC CONST struct {
+    UINT16          Scan;
+    CONST CHAR8     *Label;
+  } Map[] = {
+    { SCAN_F1,  "F1"  }, { SCAN_F2,  "F2"  }, { SCAN_F3,  "F3"  },
+    { SCAN_F4,  "F4"  }, { SCAN_F5,  "F5"  }, { SCAN_F6,  "F6"  },
+    { SCAN_F7,  "F7"  }, { SCAN_F8,  "F8"  }, { SCAN_F9,  "F9"  },
+    { SCAN_F10, "F10" }, { SCAN_F11, "F11" }, { SCAN_F12, "F12" }
+  };
+  UINTN  Idx;
+
+  for (Idx = 0; Idx < ARRAY_SIZE (Map); Idx++) {
+    if (Map[Idx].Scan == ScanCode) {
+      return Map[Idx].Label;
+    }
+  }
+  return NULL;
+}
+
+/**
+  Build the footer: chip row of registered hotkeys plus standard nav chips.
 **/
 STATIC
 VOID
@@ -203,34 +275,56 @@ BuildFooter (
   IN FORM_DISPLAY_ENGINE_FORM    *FormData
   )
 {
-  lv_obj_t  *Bar;
-  lv_obj_t  *Hints;
-  lv_obj_t  *SysInfo;
-
-  (VOID)FormData;  // hotkey list reserved for future use
+  lv_obj_t         *Bar;
+  LIST_ENTRY       *Link;
+  BROWSER_HOT_KEY  *HotKey;
+  CONST CHAR8      *KeyLabel;
+  CHAR8            *Utf8;
 
   Bar = lv_obj_create (Screen);
   lv_obj_remove_style_all (Bar);
   lv_obj_set_size (Bar, LV_PCT (100), THEME_FOOTER_HEIGHT);
   lv_obj_set_style_bg_color (Bar, lv_color_hex (THEME_COLOR_FOOTER_BG), 0);
   lv_obj_set_style_bg_opa (Bar, LV_OPA_COVER, 0);
-  lv_obj_set_style_pad_left (Bar, 16, 0);
-  lv_obj_set_style_pad_right (Bar, 16, 0);
-  lv_obj_set_style_pad_top (Bar, 0, 0);
-  lv_obj_set_style_pad_bottom (Bar, 0, 0);
+  lv_obj_set_style_pad_left (Bar, 12, 0);
+  lv_obj_set_style_pad_right (Bar, 12, 0);
+  lv_obj_set_style_pad_top (Bar, 2, 0);
+  lv_obj_set_style_pad_bottom (Bar, 2, 0);
+  lv_obj_set_style_pad_column (Bar, 6, 0);
+  lv_obj_set_flex_flow (Bar, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align (Bar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_clear_flag (Bar, LV_OBJ_FLAG_SCROLLABLE);
 
-  Hints = lv_label_create (Bar);
-  lv_label_set_text (Hints, APTIO_FOOTER_NAV_HINTS);
-  lv_obj_set_style_text_font (Hints, THEME_FONT_BODY, 0);
-  lv_obj_set_style_text_color (Hints, lv_color_hex (THEME_COLOR_FOOTER_TEXT), 0);
-  lv_obj_align (Hints, LV_ALIGN_LEFT_MID, 0, 0);
+  //
+  // Standard navigation chips (always present).
+  //
+  AddHotKeyChip (Bar, LV_SYMBOL_UP LV_SYMBOL_DOWN, "Move");
+  AddHotKeyChip (Bar, "Enter", "Select");
+  AddHotKeyChip (Bar, "Esc",   "Exit");
 
-  SysInfo = lv_label_create (Bar);
-  lv_label_set_text (SysInfo, APTIO_FOOTER_SYSINFO);
-  lv_obj_set_style_text_font (SysInfo, THEME_FONT_BODY, 0);
-  lv_obj_set_style_text_color (SysInfo, lv_color_hex (THEME_COLOR_FOOTER_DIM), 0);
-  lv_obj_align (SysInfo, LV_ALIGN_RIGHT_MID, 0, 0);
+  //
+  // Driver-registered hotkeys from FormData->HotKeyListHead.
+  //
+  if ((FormData != NULL) && !IsListEmpty (&FormData->HotKeyListHead)) {
+    for (Link = FormData->HotKeyListHead.ForwardLink;
+         Link != &FormData->HotKeyListHead;
+         Link = Link->ForwardLink)
+    {
+      HotKey = BROWSER_HOT_KEY_FROM_LINK (Link);
+      if ((HotKey->KeyData == NULL) || (HotKey->HelpString == NULL)) {
+        continue;
+      }
+      KeyLabel = ScanCodeToChipKey (HotKey->KeyData->ScanCode);
+      if (KeyLabel == NULL) {
+        continue;
+      }
+      Utf8 = ChromeUcs2ToUtf8 (HotKey->HelpString);
+      AddHotKeyChip (Bar, KeyLabel, Utf8 != NULL ? Utf8 : "");
+      if (Utf8 != NULL) {
+        FreePool (Utf8);
+      }
+    }
+  }
 }
 
 lv_obj_t *
@@ -249,8 +343,8 @@ AptioBuildChrome (
   // than a typical GOP framebuffer (800x600 vs 1280x800), so it
   // wouldn't tile/scale correctly anyway.
   lv_obj_remove_style_all (Screen);
-  lv_obj_set_style_bg_color (Screen, lv_color_hex (THEME_COLOR_HEADER_BG_TOP), 0);
-  lv_obj_set_style_bg_grad_color (Screen, lv_color_hex (0x14264A), 0);
+  lv_obj_set_style_bg_color (Screen, lv_color_hex (THEME_COLOR_BG_SCREEN), 0);
+  lv_obj_set_style_bg_grad_color (Screen, lv_color_hex (THEME_COLOR_BG_SCREEN), 0);
   lv_obj_set_style_bg_grad_dir (Screen, LV_GRAD_DIR_VER, 0);
   lv_obj_set_style_bg_opa (Screen, LV_OPA_COVER, 0);
   lv_obj_set_flex_flow (Screen, LV_FLEX_FLOW_COLUMN);
@@ -258,27 +352,75 @@ AptioBuildChrome (
   lv_obj_set_style_pad_row (Screen, 0, 0);
   lv_obj_clear_flag (Screen, LV_OBJ_FLAG_SCROLLABLE);
 
-  // Header / subtitle / content / footer in flex order.
+  // Header / subtitle / [content row | help pane] / footer in flex order.
   BuildHeader (Screen);
   BuildSubtitleBar (Screen, FormData);
 
-  // No frame — match Demo/1.png: rows float over the wallpaper with
-  // side margins. Content panel is just a transparent flex column.
-  Content = lv_obj_create (Screen);
-  lv_obj_remove_style_all (Content);
-  lv_obj_set_width (Content, LV_PCT (100));
-  lv_obj_set_flex_grow (Content, 1);
-  lv_obj_set_flex_flow (Content, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_style_pad_left (Content, 24, 0);
-  lv_obj_set_style_pad_right (Content, 24, 0);
-  lv_obj_set_style_pad_top (Content, 12, 0);
-  lv_obj_set_style_pad_bottom (Content, 12, 0);
-  lv_obj_set_style_pad_row (Content, 6, 0);
-  lv_obj_set_style_bg_opa (Content, LV_OPA_TRANSP, 0);
-  lv_obj_add_flag (Content, LV_OBJ_FLAG_SCROLLABLE);
-  // No bounce-past-edge: content stops cleanly at the boundary.
-  lv_obj_clear_flag (Content, LV_OBJ_FLAG_SCROLL_ELASTIC);
-  lv_obj_clear_flag (Content, LV_OBJ_FLAG_SCROLL_MOMENTUM);
+  //
+  // Middle band: horizontal flex with rows panel on the left and help pane
+  // on the right. The middle band itself fills the vertical space between
+  // the subtitle bar and the footer.
+  //
+  {
+    lv_obj_t  *Middle;
+    lv_obj_t  *HelpPane;
+    lv_obj_t  *HelpHeader;
+
+    Middle = lv_obj_create (Screen);
+    lv_obj_remove_style_all (Middle);
+    lv_obj_set_width (Middle, LV_PCT (100));
+    lv_obj_set_flex_grow (Middle, 1);
+    lv_obj_set_flex_flow (Middle, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_all (Middle, 0, 0);
+    lv_obj_set_style_pad_column (Middle, 0, 0);
+    lv_obj_set_style_bg_opa (Middle, LV_OPA_TRANSP, 0);
+    lv_obj_clear_flag (Middle, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Left: scrollable form rows (transparent column).
+    Content = lv_obj_create (Middle);
+    lv_obj_remove_style_all (Content);
+    lv_obj_set_height (Content, LV_PCT (100));
+    lv_obj_set_flex_grow (Content, 1);
+    lv_obj_set_flex_flow (Content, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_left (Content, 24, 0);
+    lv_obj_set_style_pad_right (Content, 16, 0);
+    lv_obj_set_style_pad_top (Content, 12, 0);
+    lv_obj_set_style_pad_bottom (Content, 12, 0);
+    lv_obj_set_style_pad_row (Content, 6, 0);
+    lv_obj_set_style_bg_opa (Content, LV_OPA_TRANSP, 0);
+    lv_obj_add_flag (Content, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag (Content, LV_OBJ_FLAG_SCROLL_ELASTIC);
+    lv_obj_clear_flag (Content, LV_OBJ_FLAG_SCROLL_MOMENTUM);
+
+    // Right: help pane (fixed width). Header label "Help" + body label.
+    HelpPane = lv_obj_create (Middle);
+    lv_obj_remove_style_all (HelpPane);
+    lv_obj_set_size (HelpPane, 240, LV_PCT (100));
+    lv_obj_set_style_bg_color (HelpPane, lv_color_hex (THEME_COLOR_BG_PANEL), 0);
+    lv_obj_set_style_bg_opa (HelpPane, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color (HelpPane, lv_color_hex (THEME_COLOR_BG_SEPARATOR), 0);
+    lv_obj_set_style_border_side (HelpPane, LV_BORDER_SIDE_LEFT, 0);
+    lv_obj_set_style_border_width (HelpPane, 1, 0);
+    lv_obj_set_style_pad_left (HelpPane, 14, 0);
+    lv_obj_set_style_pad_right (HelpPane, 14, 0);
+    lv_obj_set_style_pad_top (HelpPane, 12, 0);
+    lv_obj_set_style_pad_bottom (HelpPane, 12, 0);
+    lv_obj_set_style_pad_row (HelpPane, 8, 0);
+    lv_obj_set_flex_flow (HelpPane, LV_FLEX_FLOW_COLUMN);
+    lv_obj_clear_flag (HelpPane, LV_OBJ_FLAG_SCROLLABLE);
+
+    HelpHeader = lv_label_create (HelpPane);
+    lv_label_set_text (HelpHeader, "Help");
+    lv_obj_set_style_text_font (HelpHeader, THEME_FONT_BODY, 0);
+    lv_obj_set_style_text_color (HelpHeader, lv_color_hex (THEME_COLOR_TEXT_SECONDARY), 0);
+
+    mHelpLabel = lv_label_create (HelpPane);
+    lv_label_set_long_mode (mHelpLabel, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width (mHelpLabel, LV_PCT (100));
+    lv_obj_set_style_text_font (mHelpLabel, THEME_FONT_BODY, 0);
+    lv_obj_set_style_text_color (mHelpLabel, lv_color_hex (THEME_COLOR_TEXT_PRIMARY), 0);
+    lv_label_set_text (mHelpLabel, "");
+  }
 
   BuildFooter (Screen, FormData);
 
@@ -296,4 +438,17 @@ AptioChromeTeardown (
     mClockTimer = NULL;
   }
   mClockLabel = NULL;
+  mHelpLabel  = NULL;
+}
+
+VOID
+EFIAPI
+AptioSetHelpText (
+  IN CONST CHAR8  *Utf8
+  )
+{
+  if (mHelpLabel == NULL) {
+    return;
+  }
+  lv_label_set_text (mHelpLabel, (Utf8 != NULL) ? Utf8 : "");
 }

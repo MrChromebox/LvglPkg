@@ -138,6 +138,36 @@ GetPromptUtf8 (
   return Utf8;
 }
 
+/**
+  Get help text for a statement as UTF-8. Caller must FreePool().
+  STATEMENT_HEADER.Help is shared by every opcode that embeds it.
+**/
+STATIC
+CHAR8 *
+GetHelpUtf8 (
+  IN FORM_DISPLAY_ENGINE_STATEMENT  *Statement,
+  IN EFI_HII_HANDLE                HiiHandle
+  )
+{
+  EFI_STRING_ID  HelpId;
+  CHAR16         *Str16;
+  CHAR8          *Utf8;
+
+  HelpId = ((EFI_IFR_SUBTITLE *)Statement->OpCode)->Statement.Help;
+  if (HelpId == 0) {
+    return NULL;
+  }
+
+  Str16 = HiiGetString (HiiHandle, HelpId, NULL);
+  if (Str16 == NULL) {
+    return NULL;
+  }
+
+  Utf8 = Ucs2ToUtf8 (Str16);
+  FreePool (Str16);
+  return Utf8;
+}
+
 //
 // ---- Ordered list array helpers (mirror of DisplayEngineDxe ProcessOptions.c) ----
 //
@@ -1018,6 +1048,34 @@ OnNavKey (
   }
 }
 
+/**
+  LV_EVENT_FOCUSED handler — push the focused statement's Help string into
+  the chrome's help pane.
+**/
+STATIC
+VOID
+OnFocusUpdateHelp (
+  lv_event_t  *Event
+  )
+{
+  LVGL_STATEMENT_CONTEXT  *Ctx;
+  CHAR8                   *Utf8;
+
+  Ctx = (LVGL_STATEMENT_CONTEXT *)lv_event_get_user_data (Event);
+  if ((Ctx == NULL) || (Ctx->Statement == NULL) ||
+      (mSession.FormData == NULL) || (mSession.FormData->HiiHandle == NULL))
+  {
+    AptioSetHelpText ("");
+    return;
+  }
+
+  Utf8 = GetHelpUtf8 (Ctx->Statement, mSession.FormData->HiiHandle);
+  AptioSetHelpText (Utf8 != NULL ? Utf8 : "");
+  if (Utf8 != NULL) {
+    FreePool (Utf8);
+  }
+}
+
 STATIC
 VOID
 AddToNavGroup (
@@ -1028,6 +1086,9 @@ AddToNavGroup (
 {
   lv_group_add_obj (Group, Widget);
   lv_obj_add_event_cb (Widget, OnNavKey, LV_EVENT_KEY | LV_EVENT_PREPROCESS, Ctx);
+  if (Ctx != NULL) {
+    lv_obj_add_event_cb (Widget, OnFocusUpdateHelp, LV_EVENT_FOCUSED, Ctx);
+  }
 }
 
 //
@@ -1048,23 +1109,30 @@ StyleRow (
   lv_obj_set_flex_flow (Row, LV_FLEX_FLOW_ROW);
   lv_obj_clear_flag (Row, LV_OBJ_FLAG_SCROLLABLE);
 
-  // default: dark capsule, slightly translucent so the gradient shows
-  lv_obj_set_style_bg_color (Row, lv_color_hex (0x0A1428), 0);
-  lv_obj_set_style_bg_opa (Row, LV_OPA_80, 0);
+  // default: panel-tinted capsule
+  lv_obj_set_style_bg_color (Row, lv_color_hex (THEME_COLOR_ROW_BG), 0);
+  lv_obj_set_style_bg_opa (Row, LV_OPA_COVER, 0);
   lv_obj_set_style_border_width (Row, 0, 0);
+  lv_obj_set_style_border_side (Row, LV_BORDER_SIDE_LEFT, 0);
+  lv_obj_set_style_border_color (Row, lv_color_hex (THEME_COLOR_ACCENT), 0);
   lv_obj_set_style_radius (Row, 4, 0);
   lv_obj_set_style_pad_left (Row, 16, 0);
   lv_obj_set_style_pad_right (Row, 16, 0);
   lv_obj_set_style_pad_top (Row, 10, 0);
   lv_obj_set_style_pad_bottom (Row, 10, 0);
-  lv_obj_set_style_text_color (Row, lv_color_hex (0xE6F0FF), 0);
+  lv_obj_set_style_text_color (Row, lv_color_hex (THEME_COLOR_ROW_TEXT), 0);
   lv_obj_set_style_shadow_width (Row, 0, 0);
 
-  // focused: solid bright blue + white text
-  lv_obj_set_style_bg_color (Row, lv_color_hex (THEME_COLOR_HIGHLIGHT_ROW), LV_STATE_FOCUSED);
+  // focused: elevated panel + accent left bar + brighter text
+  lv_obj_set_style_bg_color (Row, lv_color_hex (THEME_COLOR_BG_PANEL_ELEV), LV_STATE_FOCUSED);
   lv_obj_set_style_bg_opa (Row, LV_OPA_COVER, LV_STATE_FOCUSED);
-  lv_obj_set_style_text_color (Row, lv_color_hex (0xFFFFFF), LV_STATE_FOCUSED);
+  lv_obj_set_style_border_width (Row, 3, LV_STATE_FOCUSED);
+  lv_obj_set_style_text_color (Row, lv_color_hex (THEME_COLOR_ROW_TEXT_FOCUSED), LV_STATE_FOCUSED);
   lv_obj_set_style_shadow_width (Row, 0, LV_STATE_FOCUSED);
+
+  // disabled: muted text, unchanged bg
+  lv_obj_set_style_text_color (Row, lv_color_hex (THEME_COLOR_ROW_TEXT_DISABLED), LV_STATE_DISABLED);
+  lv_obj_set_style_text_opa (Row, LV_OPA_70, LV_STATE_DISABLED);
 }
 
 STATIC

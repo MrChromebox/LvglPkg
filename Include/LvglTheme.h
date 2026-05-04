@@ -17,17 +17,40 @@
 //
 // Background colors (24-bit RGB; passed to lv_color_hex())
 //
-#define THEME_COLOR_BG_SCREEN     0x1A1A2E
-#define THEME_COLOR_BG_PANEL      0x16213E
-#define THEME_COLOR_BG_DIALOG     0x2A2A4A
-#define THEME_COLOR_BG_SEPARATOR  0x555580
+// NovaCore palette: near-black canvas, blue-tinted panels, accent blue.
+//
+#define THEME_COLOR_BG_SCREEN     0x0F141A
+#define THEME_COLOR_BG_PANEL      0x182328
+#define THEME_COLOR_BG_PANEL_ELEV 0x23304A
+#define THEME_COLOR_BG_DIALOG     0x1B2A3A
+#define THEME_COLOR_BG_SEPARATOR  0x2A3A52
 
 //
 // Text colors
 //
-#define THEME_COLOR_TEXT_TITLE    0xFFFFFF
-#define THEME_COLOR_TEXT_LABEL    0xCCCCCC
-#define THEME_COLOR_TEXT_POPUP    0xCCCCCC
+#define THEME_COLOR_TEXT_TITLE     0xFFFFFF
+#define THEME_COLOR_TEXT_PRIMARY   0xEAF2FF
+#define THEME_COLOR_TEXT_SECONDARY 0x9FB0C8
+#define THEME_COLOR_TEXT_DISABLED  0x6A7B92
+#define THEME_COLOR_TEXT_LABEL     THEME_COLOR_TEXT_PRIMARY
+#define THEME_COLOR_TEXT_POPUP     THEME_COLOR_TEXT_PRIMARY
+
+//
+// Row colors (default vs focused).
+//
+#define THEME_COLOR_ROW_BG            THEME_COLOR_BG_PANEL
+#define THEME_COLOR_ROW_TEXT          THEME_COLOR_TEXT_PRIMARY
+#define THEME_COLOR_ROW_TEXT_FOCUSED  0xFFFFFF
+#define THEME_COLOR_ROW_TEXT_DISABLED THEME_COLOR_TEXT_DISABLED
+
+//
+// Accent (focus ring + active selection).
+//
+#define THEME_COLOR_ACCENT        0x1A6FD8
+#define THEME_COLOR_ACCENT_HOVER  0x2A85F0
+#define THEME_COLOR_SUCCESS       0x2BC79F
+#define THEME_COLOR_WARNING       0xE9A23B
+#define THEME_COLOR_DANGER        0xE25555
 
 //
 // Accent (subtitle / focus highlight) — LV_PALETTE_* enum value
@@ -61,16 +84,16 @@
 // Aptio-style chrome (header / subtitle / footer / wallpaper).
 // Used by LvglDisplayEngineDxe/LvglAptioChrome.c.
 //
-#define THEME_COLOR_HEADER_BG_TOP     0x0A1428
-#define THEME_COLOR_HEADER_BG_BOTTOM  0x1F3A6E
+#define THEME_COLOR_HEADER_BG_TOP     0x0B1218
+#define THEME_COLOR_HEADER_BG_BOTTOM  0x16263F
 #define THEME_COLOR_HEADER_TEXT       0xFFFFFF
-#define THEME_COLOR_HEADER_DIM        0xA0B8D8
-#define THEME_COLOR_SUBTITLE_BG       0x16213E
-#define THEME_COLOR_SUBTITLE_TEXT     0xCFE3FF
-#define THEME_COLOR_FOOTER_BG         0x0E1A33
-#define THEME_COLOR_FOOTER_TEXT       0xCFE3FF
-#define THEME_COLOR_FOOTER_DIM        0x7A8FB5
-#define THEME_COLOR_HIGHLIGHT_ROW     0x1E66D4
+#define THEME_COLOR_HEADER_DIM        0x9FB0C8
+#define THEME_COLOR_SUBTITLE_BG       0x182328
+#define THEME_COLOR_SUBTITLE_TEXT     0xEAF2FF
+#define THEME_COLOR_FOOTER_BG         0x0B1218
+#define THEME_COLOR_FOOTER_TEXT       0xEAF2FF
+#define THEME_COLOR_FOOTER_DIM        0x6A7B92
+#define THEME_COLOR_HIGHLIGHT_ROW     THEME_COLOR_ACCENT
 
 #define THEME_HEADER_HEIGHT       44
 #define THEME_SUBTITLE_HEIGHT     28
