@@ -100,6 +100,53 @@
 #define THEME_FOOTER_HEIGHT       32
 
 //
+// Chrome — help pane (right column).
+//
+#define THEME_HELPPANE_WIDTH         240
+#define THEME_PAD_HELPPANE_X         14
+#define THEME_PAD_HELPPANE_Y         12
+#define THEME_PAD_HELPPANE_ROW_GAP   8
+
+//
+// Chrome — header / subtitle / content / footer paddings.
+//
+#define THEME_PAD_HEADER_X           16
+#define THEME_PAD_SUBTITLE_X         16
+#define THEME_PAD_CONTENT_LEFT       24
+#define THEME_PAD_CONTENT_RIGHT      16
+#define THEME_PAD_CONTENT_Y          12
+#define THEME_PAD_CONTENT_ROW_GAP    6
+#define THEME_PAD_FOOTER_X           12
+#define THEME_PAD_FOOTER_Y           2
+#define THEME_PAD_FOOTER_COL_GAP     6
+
+//
+// Footer "chip" widgets (one per registered hotkey + nav primitives).
+//
+#define THEME_PAD_CHIP_X             8
+#define THEME_PAD_CHIP_Y             4
+#define THEME_PAD_CHIP_COL_GAP       6
+#define THEME_RADIUS_CHIP            4
+
+//
+// Form rows (StyleRow).
+//
+#define THEME_RADIUS_ROW             4
+#define THEME_PAD_ROW_X              16
+#define THEME_PAD_ROW_Y              10
+#define THEME_BORDER_FOCUS           3
+
+//
+// Generic 1 px separator/border thickness used between panes.
+//
+#define THEME_BORDER_PANE            1
+
+//
+// Confirm/discard dialog card width as a percentage of the screen.
+//
+#define THEME_DIALOG_WIDTH_PCT       50
+
+//
 // Static strings shown in the chrome (no SMBIOS lookup yet).
 //
 #define APTIO_HEADER_TITLE        "EDK II Boot Manager"

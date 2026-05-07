@@ -667,7 +667,7 @@ ShowPopup (
   // Dialog card.
   //
   Card = lv_obj_create (Overlay);
-  lv_obj_set_width (Card, LV_PCT (50));
+  lv_obj_set_width (Card, LV_PCT (THEME_DIALOG_WIDTH_PCT));
   lv_obj_set_height (Card, LV_SIZE_CONTENT);
   lv_obj_set_flex_flow (Card, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_style_pad_all (Card, THEME_PAD_DIALOG, 0);
@@ -682,7 +682,7 @@ ShowPopup (
   lv_obj_set_style_text_color (TitleLbl, lv_color_hex (THEME_COLOR_TEXT_TITLE), 0);
 
   Sep = lv_obj_create (Card);
-  lv_obj_set_size (Sep, LV_PCT (100), 1);
+  lv_obj_set_size (Sep, LV_PCT (100), THEME_BORDER_PANE);
   lv_obj_set_style_bg_color (Sep, lv_color_hex (THEME_COLOR_BG_SEPARATOR), 0);
   lv_obj_set_style_border_width (Sep, 0, 0);
   lv_obj_set_style_pad_all (Sep, 0, 0);
@@ -1115,18 +1115,18 @@ StyleRow (
   lv_obj_set_style_border_width (Row, 0, 0);
   lv_obj_set_style_border_side (Row, LV_BORDER_SIDE_LEFT, 0);
   lv_obj_set_style_border_color (Row, lv_color_hex (THEME_COLOR_ACCENT), 0);
-  lv_obj_set_style_radius (Row, 4, 0);
-  lv_obj_set_style_pad_left (Row, 16, 0);
-  lv_obj_set_style_pad_right (Row, 16, 0);
-  lv_obj_set_style_pad_top (Row, 10, 0);
-  lv_obj_set_style_pad_bottom (Row, 10, 0);
+  lv_obj_set_style_radius (Row, THEME_RADIUS_ROW, 0);
+  lv_obj_set_style_pad_left (Row, THEME_PAD_ROW_X, 0);
+  lv_obj_set_style_pad_right (Row, THEME_PAD_ROW_X, 0);
+  lv_obj_set_style_pad_top (Row, THEME_PAD_ROW_Y, 0);
+  lv_obj_set_style_pad_bottom (Row, THEME_PAD_ROW_Y, 0);
   lv_obj_set_style_text_color (Row, lv_color_hex (THEME_COLOR_ROW_TEXT), 0);
   lv_obj_set_style_shadow_width (Row, 0, 0);
 
   // focused: elevated panel + accent left bar + brighter text
   lv_obj_set_style_bg_color (Row, lv_color_hex (THEME_COLOR_BG_PANEL_ELEV), LV_STATE_FOCUSED);
   lv_obj_set_style_bg_opa (Row, LV_OPA_COVER, LV_STATE_FOCUSED);
-  lv_obj_set_style_border_width (Row, 3, LV_STATE_FOCUSED);
+  lv_obj_set_style_border_width (Row, THEME_BORDER_FOCUS, LV_STATE_FOCUSED);
   lv_obj_set_style_text_color (Row, lv_color_hex (THEME_COLOR_ROW_TEXT_FOCUSED), LV_STATE_FOCUSED);
   lv_obj_set_style_shadow_width (Row, 0, LV_STATE_FOCUSED);
 
@@ -1192,6 +1192,8 @@ CreateSubtitleWidget (
   }
 
   Label = lv_label_create (Parent);
+  lv_label_set_long_mode (Label, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width (Label, LV_PCT (100));
   lv_label_set_text (Label, Text);
   lv_obj_set_style_text_font (Label, THEME_FONT_BODY, 0);
   lv_obj_set_style_text_color (Label, lv_palette_main (THEME_ACCENT_PALETTE), 0);
@@ -1217,6 +1219,8 @@ CreateTextWidget (
   }
 
   Label = lv_label_create (Parent);
+  lv_label_set_long_mode (Label, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width (Label, LV_PCT (100));
   lv_label_set_text (Label, Text);
 
   FreePool (Text);
