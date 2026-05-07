@@ -296,6 +296,21 @@ BuildFooter (
   lv_obj_clear_flag (Bar, LV_OBJ_FLAG_SCROLLABLE);
 
   //
+  // "Unsaved changes" notice — prepended when any question on the form
+  // has been modified since the form opened. SetupBrowserDxe maintains
+  // FormData->SettingChangedFlag.
+  //
+  if ((FormData != NULL) && FormData->SettingChangedFlag) {
+    lv_obj_t  *Notice;
+
+    Notice = lv_label_create (Bar);
+    lv_label_set_text (Notice, LV_SYMBOL_WARNING "  Unsaved changes \xE2\x80\x94 press F10 to save");
+    lv_obj_set_style_text_font (Notice, THEME_FONT_BODY, 0);
+    lv_obj_set_style_text_color (Notice, lv_color_hex (THEME_COLOR_WARNING), 0);
+    lv_obj_set_style_pad_right (Notice, THEME_PAD_FOOTER_X, 0);
+  }
+
+  //
   // Standard navigation chips (always present).
   //
   AddHotKeyChip (Bar, LV_SYMBOL_UP LV_SYMBOL_DOWN, "Move");

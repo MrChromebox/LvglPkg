@@ -14,9 +14,20 @@
 #include "LvglFormRenderer.h"
 #include "LvglAptioChrome.h"
 #include <LvglTheme.h>
+#include <Library/PrintLib.h>
 
 STATIC LVGL_FORM_SESSION  mSession;
 STATIC BOOLEAN            mLvglReady = FALSE;
+
+//
+// Custom navigation list. lv_group_focus_next/prev skip widgets that have
+// LV_STATE_DISABLED, which would make grayed-out questions un-reachable
+// by keyboard. We keep a parallel ordered list of every nav-eligible widget
+// so UP/DOWN can step onto disabled rows too (read-only focus).
+//
+#define LVGL_NAV_MAX  256
+STATIC lv_obj_t  *mNavList[LVGL_NAV_MAX];
+STATIC UINTN     mNavCount = 0;
 
 //
 // Popup state — shared by the F10 in-loop overlay and LvglRunConfirmPopup.
@@ -30,6 +41,8 @@ STATIC lv_obj_t  *mPopupLastObj      = NULL;
 STATIC UINT32     mPopupConfirmAction = 0;
 STATIC UINT16     mPendingDefaultId   = 0;
 STATIC UINT32     mDiscardAction      = BROWSER_ACTION_DISCARD;
+STATIC BOOLEAN    mPopupHasDiscard    = FALSE;
+STATIC lv_obj_t   *mPopupPrevFocus    = NULL;
 STATIC UINT32     mNoneAction         = BROWSER_ACTION_NONE;
 
 //
@@ -428,6 +441,26 @@ OnCheckboxChanged (
 }
 
 /**
+  Dropdown opened handler — sizes the popup list to its content so long
+  option strings are not truncated by the (narrow) button width.
+**/
+STATIC
+VOID
+OnDropdownOpened (
+  lv_event_t  *Event
+  )
+{
+  lv_obj_t  *Dd;
+  lv_obj_t  *List;
+
+  Dd   = lv_event_get_target_obj (Event);
+  List = lv_dropdown_get_list (Dd);
+  if (List != NULL) {
+    lv_obj_set_width (List, LV_SIZE_CONTENT);
+  }
+}
+
+/**
   Dropdown value-changed handler — records the selected option index.
 **/
 STATIC
@@ -569,6 +602,11 @@ OnPopupBtn (
     mPopupOverlay = NULL;
     mPopupFirstObj = NULL;
     mPopupLastObj  = NULL;
+    if ((mPopupPrevFocus != NULL) && (mSession.Group != NULL)) {
+      lv_group_focus_obj (mPopupPrevFocus);
+    }
+
+    mPopupPrevFocus = NULL;
   }
 }
 
@@ -588,13 +626,32 @@ OnPopupKey (
 
   Key = lv_indev_get_key (lv_indev_active ());
 
-  if (Key == LV_KEY_ESC) {
-    mPopupResult = BROWSER_ACTION_NONE;
+  //
+  // Y/N/ESC shortcuts mirror the legacy text browser: Y confirms (Save),
+  // N discards (when offered), ESC cancels.
+  //
+  if ((Key == LV_KEY_ESC) ||
+      (Key == 'Y') || (Key == 'y') ||
+      (Key == 'N') || (Key == 'n'))
+  {
+    if ((Key == 'Y') || (Key == 'y')) {
+      mPopupResult = mPopupConfirmAction;
+    } else if (((Key == 'N') || (Key == 'n')) && mPopupHasDiscard) {
+      mPopupResult = mDiscardAction;
+    } else {
+      mPopupResult = BROWSER_ACTION_NONE;
+    }
+
     if (mPopupOverlay != NULL) {
       lv_obj_delete (mPopupOverlay);
       mPopupOverlay  = NULL;
       mPopupFirstObj = NULL;
       mPopupLastObj  = NULL;
+      if ((mPopupPrevFocus != NULL) && (mSession.Group != NULL)) {
+        lv_group_focus_obj (mPopupPrevFocus);
+      }
+
+      mPopupPrevFocus = NULL;
     }
 
     lv_event_stop_processing (Event);
@@ -649,6 +706,8 @@ ShowPopup (
 
   mPopupConfirmAction = ConfirmAction;
   mPopupResult        = LVGL_POPUP_PENDING;
+  mPopupHasDiscard    = ShowDiscard;
+  mPopupPrevFocus     = (Group != NULL) ? lv_group_get_focused (Group) : NULL;
 
   //
   // Semi-transparent full-screen overlay that blocks clicks on form widgets.
@@ -705,7 +764,11 @@ ShowPopup (
   //
   ConfirmBtn = lv_btn_create (BtnRow);
   Lbl        = lv_label_create (ConfirmBtn);
-  lv_label_set_text (Lbl, ConfirmLabel);
+  {
+    CHAR8  ConfirmText[64];
+    AsciiSPrint (ConfirmText, sizeof (ConfirmText), "%a (Y)", ConfirmLabel);
+    lv_label_set_text (Lbl, ConfirmText);
+  }
   lv_obj_add_event_cb (ConfirmBtn, OnPopupBtn, LV_EVENT_CLICKED, &mPopupConfirmAction);
   lv_obj_add_event_cb (ConfirmBtn, OnPopupKey, LV_EVENT_KEY, NULL);
   lv_group_add_obj (Group, ConfirmBtn);
@@ -718,7 +781,7 @@ ShowPopup (
   if (ShowDiscard) {
     DiscardBtn = lv_btn_create (BtnRow);
     Lbl        = lv_label_create (DiscardBtn);
-    lv_label_set_text (Lbl, "Discard");
+    lv_label_set_text (Lbl, "Discard (N)");
     lv_obj_add_event_cb (DiscardBtn, OnPopupBtn, LV_EVENT_CLICKED, &mDiscardAction);
     lv_obj_add_event_cb (DiscardBtn, OnPopupKey, LV_EVENT_KEY, NULL);
     lv_group_add_obj (Group, DiscardBtn);
@@ -730,7 +793,7 @@ ShowPopup (
   //
   CancelBtn = lv_btn_create (BtnRow);
   Lbl       = lv_label_create (CancelBtn);
-  lv_label_set_text (Lbl, "Cancel");
+  lv_label_set_text (Lbl, "Cancel (Esc)");
   lv_obj_add_event_cb (CancelBtn, OnPopupBtn, LV_EVENT_CLICKED, &mNoneAction);
   lv_obj_add_event_cb (CancelBtn, OnPopupKey, LV_EVENT_KEY, NULL);
   lv_group_add_obj (Group, CancelBtn);
@@ -814,6 +877,8 @@ OnIndevFallbackKey (
   lv_indev_t  *Indev;
   lv_key_t    Key;
 
+  lv_obj_t  *Focused;
+
   Indev = lv_indev_active ();
   Key   = lv_indev_get_key (Indev);
 
@@ -824,10 +889,46 @@ OnIndevFallbackKey (
     return;
   }
 
-  if ((mSession.Group != NULL) && (lv_group_get_focused (mSession.Group) != NULL)) {
-    //
-    // A widget has focus — OnNavKey will handle the key.
-    //
+  Focused = (mSession.Group != NULL) ? lv_group_get_focused (mSession.Group) : NULL;
+
+  //
+  // UP/DOWN nav is centralized here so it works uniformly for enabled and
+  // disabled (grayed-out) focused widgets. lv_group_focus_next/prev would
+  // skip disabled widgets; we walk our own ordered list instead.
+  //
+  if ((Key == LV_KEY_UP) || (Key == LV_KEY_DOWN)) {
+    if (mNavCount > 0) {
+      UINTN  Idx   = 0;
+      UINTN  Found = mNavCount;
+      for (Idx = 0; Idx < mNavCount; Idx++) {
+        if (mNavList[Idx] == Focused) {
+          Found = Idx;
+          break;
+        }
+      }
+
+      if (Found == mNavCount) {
+        Found = (Key == LV_KEY_DOWN) ? (mNavCount - 1) : 0;
+      }
+
+      if (Key == LV_KEY_DOWN) {
+        Idx = (Found + 1) % mNavCount;
+      } else {
+        Idx = (Found == 0) ? (mNavCount - 1) : (Found - 1);
+      }
+
+      lv_group_focus_obj (mNavList[Idx]);
+    }
+
+    return;
+  }
+
+  //
+  // Remaining handlers (ESC / F-keys) only fire when nothing is focused or
+  // the focused widget is disabled — when something enabled is focused,
+  // its OnNavKey will receive the LV_EVENT_KEY directly.
+  //
+  if ((Focused != NULL) && !lv_obj_has_state (Focused, LV_STATE_DISABLED)) {
     return;
   }
 
@@ -1003,6 +1104,24 @@ OnNavKey (
   }
 
   if (Key == LV_KEY_ESC) {
+    //
+    // If a dropdown popup is open (mouse-click or Enter-toggle), ESC
+    // should close the popup, not exit the form.
+    //
+    Focused = lv_group_get_focused (mSession.Group);
+    if ((Focused != NULL) &&
+        lv_obj_check_type (Focused, &lv_dropdown_class) &&
+        lv_dropdown_is_open (Focused))
+    {
+      lv_dropdown_close (Focused);
+      if (Editing) {
+        lv_group_set_editing (mSession.Group, false);
+      }
+
+      lv_event_stop_processing (Event);
+      return;
+    }
+
     if (Editing) {
       lv_group_set_editing (mSession.Group, false);
     } else {
@@ -1026,15 +1145,19 @@ OnNavKey (
 
   (void)Ctx;
 
-  if (Key == LV_KEY_UP) {
-    lv_group_focus_prev (mSession.Group);
+  if ((Key == LV_KEY_UP) || (Key == LV_KEY_DOWN)) {
+    //
+    // UP/DOWN is handled exclusively by OnIndevFallbackKey so we don't
+    // double-advance. LVGL fires LV_EVENT_KEY on the indev BEFORE
+    // routing to the focused widget; the indev handler advances focus,
+    // and then if we also advanced here we would skip a row.
+    //
     lv_event_stop_processing (Event);
-  } else if (Key == LV_KEY_DOWN) {
-    lv_group_focus_next (mSession.Group);
-    lv_event_stop_processing (Event);
+    return;
   } else if (Key == LV_KEY_ENTER) {
     Focused = lv_group_get_focused (mSession.Group);
     if ((Focused != NULL) &&
+        !lv_obj_has_state (Focused, LV_STATE_DISABLED) &&
         (lv_obj_check_type (Focused, &lv_dropdown_class) ||
          lv_obj_check_type (Focused, &lv_spinbox_class)))
     {
@@ -1089,6 +1212,10 @@ AddToNavGroup (
   if (Ctx != NULL) {
     lv_obj_add_event_cb (Widget, OnFocusUpdateHelp, LV_EVENT_FOCUSED, Ctx);
   }
+
+  if (mNavCount < LVGL_NAV_MAX) {
+    mNavList[mNavCount++] = Widget;
+  }
 }
 
 //
@@ -1130,9 +1257,24 @@ StyleRow (
   lv_obj_set_style_text_color (Row, lv_color_hex (THEME_COLOR_ROW_TEXT_FOCUSED), LV_STATE_FOCUSED);
   lv_obj_set_style_shadow_width (Row, 0, LV_STATE_FOCUSED);
 
-  // disabled: muted text, unchanged bg
+  // disabled: whole-row muted text, no opacity fade.
   lv_obj_set_style_text_color (Row, lv_color_hex (THEME_COLOR_ROW_TEXT_DISABLED), LV_STATE_DISABLED);
-  lv_obj_set_style_text_opa (Row, LV_OPA_70, LV_STATE_DISABLED);
+}
+
+//
+// Decorate a row whose underlying question has been modified since the form
+// opened: solid amber left bar in the default state. The focused-state
+// border (StyleRow above) overrides this when the row gains focus.
+//
+STATIC
+VOID
+MarkRowChanged (
+  lv_obj_t  *Row
+  )
+{
+  lv_obj_set_style_border_color (Row, lv_color_hex (THEME_COLOR_WARNING), 0);
+  lv_obj_set_style_border_side  (Row, LV_BORDER_SIDE_LEFT, 0);
+  lv_obj_set_style_border_width (Row, THEME_BORDER_FOCUS, 0);
 }
 
 STATIC
@@ -1210,20 +1352,43 @@ CreateTextWidget (
   EFI_HII_HANDLE                 HiiHandle
   )
 {
-  CHAR8     *Text;
-  lv_obj_t  *Label;
+  CHAR8         *Prompt;
+  CHAR8         *ValueUtf8;
+  CHAR16        *ValueUcs2;
+  EFI_IFR_TEXT  *TextOp;
+  lv_obj_t      *Row;
+  lv_obj_t      *PromptLabel;
+  lv_obj_t      *ValueLabel;
 
-  Text = GetPromptUtf8 (Statement, HiiHandle);
-  if (Text == NULL) {
+  Prompt = GetPromptUtf8 (Statement, HiiHandle);
+  if (Prompt == NULL) {
     return;
   }
 
-  Label = lv_label_create (Parent);
-  lv_label_set_long_mode (Label, LV_LABEL_LONG_WRAP);
-  lv_obj_set_width (Label, LV_PCT (100));
-  lv_label_set_text (Label, Text);
+  TextOp    = (EFI_IFR_TEXT *)Statement->OpCode;
+  ValueUtf8 = NULL;
+  if (TextOp->TextTwo != 0) {
+    ValueUcs2 = HiiGetString (HiiHandle, TextOp->TextTwo, NULL);
+    if (ValueUcs2 != NULL) {
+      ValueUtf8 = Ucs2ToUtf8 (ValueUcs2);
+      FreePool (ValueUcs2);
+    }
+  }
 
-  FreePool (Text);
+  Row = lv_obj_create (Parent);
+  StyleRow (Row);
+
+  PromptLabel = lv_label_create (Row);
+  lv_label_set_text (PromptLabel, Prompt);
+  lv_obj_set_flex_grow (PromptLabel, 1);
+
+  if (ValueUtf8 != NULL) {
+    ValueLabel = lv_label_create (Row);
+    lv_label_set_text (ValueLabel, ValueUtf8);
+    FreePool (ValueUtf8);
+  }
+
+  FreePool (Prompt);
 }
 
 STATIC
@@ -1244,6 +1409,9 @@ CreateCheckboxWidget (
 
   Row = lv_obj_create (Parent);
   StyleRow (Row);
+  if (Statement->SettingChangedFlag) {
+    MarkRowChanged (Row);
+  }
 
   Cb = lv_checkbox_create (Row);
   lv_checkbox_set_text (Cb, Text != NULL ? Text : "Checkbox");
@@ -1256,6 +1424,7 @@ CreateCheckboxWidget (
   }
 
   if (Statement->Attribute & HII_DISPLAY_GRAYOUT) {
+    lv_obj_add_state (Row, LV_STATE_DISABLED);
     lv_obj_add_state (Cb, LV_STATE_DISABLED);
   }
 
@@ -1299,6 +1468,9 @@ CreateNumericWidget (
 
   Row = lv_obj_create (Parent);
   StyleRow (Row);
+  if (Statement->SettingChangedFlag) {
+    MarkRowChanged (Row);
+  }
 
   Label = lv_label_create (Row);
   lv_label_set_text (Label, Text != NULL ? Text : "Numeric");
@@ -1337,6 +1509,7 @@ CreateNumericWidget (
   lv_textarea_set_text (Ta, Initial);
 
   if (Statement->Attribute & HII_DISPLAY_GRAYOUT) {
+    lv_obj_add_state (Row, LV_STATE_DISABLED);
     lv_obj_add_state (Ta, LV_STATE_DISABLED);
   }
 
@@ -1372,6 +1545,7 @@ CreateOneOfWidget (
   DISPLAY_QUESTION_OPTION   *Option;
   CHAR8                     OptBuf[512];
   UINTN                     OptLen;
+  UINTN                     MaxChars;
   CHAR16                    *OptStr16;
   CHAR8                     *OptStr8;
   UINT32                    SelectedIdx;
@@ -1382,6 +1556,9 @@ CreateOneOfWidget (
 
   Row = lv_obj_create (Parent);
   StyleRow (Row);
+  if (Statement->SettingChangedFlag) {
+    MarkRowChanged (Row);
+  }
 
   Label = lv_label_create (Row);
   lv_label_set_text (Label, Text != NULL ? Text : "OneOf");
@@ -1392,6 +1569,7 @@ CreateOneOfWidget (
   //
   OptLen      = 0;
   OptBuf[0]   = '\0';
+  MaxChars    = 0;
   SelectedIdx = 0;
   CurIdx      = 0;
 
@@ -1412,6 +1590,10 @@ CreateOneOfWidget (
 
           AsciiStrCpyS (&OptBuf[OptLen], sizeof (OptBuf) - OptLen, OptStr8);
           OptLen += ItemLen;
+        }
+
+        if (ItemLen > MaxChars) {
+          MaxChars = ItemLen;
         }
 
         FreePool (OptStr8);
@@ -1458,7 +1640,16 @@ CreateOneOfWidget (
   lv_dropdown_set_options (Dd, OptBuf);
   lv_dropdown_set_selected (Dd, SelectedIdx);
 
+  //
+  // Pixel-width estimate so the closed button fits its longest option:
+  // ~10 px per glyph for the default font + 50 px slack for chevron and
+  // horizontal padding. LV_SIZE_CONTENT collapses the dropdown to just
+  // the chevron, so we use an explicit width instead.
+  //
+  lv_obj_set_width (Dd, (lv_coord_t)(MaxChars * 10 + 50));
+
   if (Statement->Attribute & HII_DISPLAY_GRAYOUT) {
+    lv_obj_add_state (Row, LV_STATE_DISABLED);
     lv_obj_add_state (Dd, LV_STATE_DISABLED);
   }
 
@@ -1468,6 +1659,8 @@ CreateOneOfWidget (
     Ctx->Widget    = Dd;
     lv_obj_add_event_cb (Dd, OnDropdownChanged, LV_EVENT_VALUE_CHANGED, Ctx);
   }
+
+  lv_obj_add_event_cb (Dd, OnDropdownOpened, LV_EVENT_READY, NULL);
 
   AddToNavGroup (Group, Dd, Ctx);
   BindRowFocus (Dd, Row);
@@ -1543,6 +1736,9 @@ CreateOrderedListWidget (
   lv_obj_set_style_pad_all (Panel, THEME_PAD_ROW, 0);
   lv_obj_set_style_border_width (Panel, 0, 0);
   lv_obj_set_style_bg_opa (Panel, LV_OPA_TRANSP, 0);
+  if (Grayout) {
+    lv_obj_set_style_text_color (Panel, lv_color_hex (THEME_COLOR_ROW_TEXT_DISABLED), 0);
+  }
 
   Header = lv_label_create (Panel);
   lv_label_set_text (Header, PromptText != NULL ? PromptText : "Ordered List");
@@ -1681,6 +1877,9 @@ CreateStringWidget (
 
   Row = lv_obj_create (Parent);
   StyleRow (Row);
+  if (Statement->SettingChangedFlag) {
+    MarkRowChanged (Row);
+  }
 
   Label = lv_label_create (Row);
   lv_label_set_text (Label, Text != NULL ? Text : "String");
@@ -1711,6 +1910,7 @@ CreateStringWidget (
   }
 
   if (Statement->Attribute & HII_DISPLAY_GRAYOUT) {
+    lv_obj_add_state (Row, LV_STATE_DISABLED);
     lv_obj_add_state (Ta, LV_STATE_DISABLED);
   }
 
@@ -1910,6 +2110,7 @@ LvglRenderForm (
   mSession.FormData       = FormData;
   mSession.UserInput      = UserInputData;
   mSession.ExitRequested  = FALSE;
+  mNavCount               = 0;
 
   ZeroMem (UserInputData, sizeof (USER_INPUT));
 
