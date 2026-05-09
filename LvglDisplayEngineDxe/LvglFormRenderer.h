@@ -49,6 +49,12 @@ typedef struct {
   // Focused group for keyboard navigation.
   //
   lv_group_t                  *Group;
+  //
+  // Bottom-docked on-screen keyboard, hidden until a textarea is focused
+  // (String / Password / Numeric). Lets mouse-only users type into HII
+  // text fields. Lives on Screen so it overlays the form chrome.
+  //
+  lv_obj_t                    *OnScreenKb;
 } LVGL_FORM_SESSION;
 
 /**

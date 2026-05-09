@@ -314,6 +314,73 @@ OnStatementClicked (
 }
 
 /**
+  Bottom-docked on-screen keyboard show/hide handlers. The keyboard is
+  created once per form (in LvglRenderForm) and hidden by default. When a
+  text-entry textarea gains focus we re-bind the keyboard to it and reveal
+  it; on defocus we hide it again. lv_keyboard's default event callback
+  forwards LV_EVENT_READY/CANCEL to the bound textarea, so the existing
+  OnStringReady / OnNumericReady commit paths still fire — we only need to
+  manage visibility here.
+
+  user_data on the textarea event: (uintptr_t)1 = numeric mode, else text.
+**/
+STATIC
+VOID
+OnTextareaFocused (
+  lv_event_t  *Event
+  )
+{
+  lv_obj_t  *Ta;
+  UINTN     IsNumeric;
+
+  if (mSession.OnScreenKb == NULL) {
+    return;
+  }
+
+  Ta        = lv_event_get_target_obj (Event);
+  IsNumeric = (UINTN)lv_event_get_user_data (Event);
+
+  lv_keyboard_set_textarea (mSession.OnScreenKb, Ta);
+  lv_keyboard_set_mode (
+    mSession.OnScreenKb,
+    IsNumeric ? LV_KEYBOARD_MODE_NUMBER : LV_KEYBOARD_MODE_TEXT_LOWER
+    );
+  lv_obj_clear_flag (mSession.OnScreenKb, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_move_foreground (mSession.OnScreenKb);
+  lv_obj_scroll_to_view (Ta, LV_ANIM_OFF);
+}
+
+STATIC
+VOID
+OnTextareaDefocused (
+  lv_event_t  *Event
+  )
+{
+  if (mSession.OnScreenKb == NULL) {
+    return;
+  }
+
+  (VOID)Event;
+  lv_obj_add_flag (mSession.OnScreenKb, LV_OBJ_FLAG_HIDDEN);
+  lv_keyboard_set_textarea (mSession.OnScreenKb, NULL);
+}
+
+STATIC
+VOID
+OnKeyboardCancel (
+  lv_event_t  *Event
+  )
+{
+  if (mSession.OnScreenKb == NULL) {
+    return;
+  }
+
+  (VOID)Event;
+  lv_obj_add_flag (mSession.OnScreenKb, LV_OBJ_FLAG_HIDDEN);
+  lv_keyboard_set_textarea (mSession.OnScreenKb, NULL);
+}
+
+/**
   String textarea commit — fires on LV_EVENT_READY (Enter key).
   Reads the typed UTF-8 text, converts to UTF-16, fills InputValue.Buffer,
   and registers a new HII string so SetupBrowserDxe can persist the value.
@@ -1520,6 +1587,13 @@ CreateNumericWidget (
     lv_obj_add_event_cb (Ta, OnNumericReady, LV_EVENT_READY, Ctx);
   }
 
+  //
+  // On-screen keyboard in NUMBER mode for the digit-only textarea.
+  //
+  lv_obj_add_event_cb (Ta, OnTextareaFocused,   LV_EVENT_FOCUSED,   (void *)(UINTN)1);
+  lv_obj_add_event_cb (Ta, OnTextareaFocused,   LV_EVENT_CLICKED,   (void *)(UINTN)1);
+  lv_obj_add_event_cb (Ta, OnTextareaDefocused, LV_EVENT_DEFOCUSED, NULL);
+
   AddToNavGroup (Group, Ta, Ctx);
   BindRowFocus (Ta, Row);
 
@@ -1922,6 +1996,15 @@ CreateStringWidget (
     lv_obj_add_event_cb (Ta, OnStringReady, LV_EVENT_READY, Ctx);
   }
 
+  //
+  // Show the on-screen keyboard when the textarea is focused or clicked.
+  // user_data = 0 → text mode (also covers password, since the keyboard
+  // forwards keys; the textarea's password_mode hides the rendering).
+  //
+  lv_obj_add_event_cb (Ta, OnTextareaFocused,   LV_EVENT_FOCUSED,   (void *)(UINTN)0);
+  lv_obj_add_event_cb (Ta, OnTextareaFocused,   LV_EVENT_CLICKED,   (void *)(UINTN)0);
+  lv_obj_add_event_cb (Ta, OnTextareaDefocused, LV_EVENT_DEFOCUSED, NULL);
+
   AddToNavGroup (Group, Ta, Ctx);
   BindRowFocus (Ta, Row);
 
@@ -2162,6 +2245,21 @@ LvglRenderForm (
     BuildFormWidgets (&mSession);
     mSession.Screen = OrigScreen;
   }
+
+  //
+  // Bottom-docked on-screen keyboard. Created on the outer Screen so it
+  // overlays the chrome; hidden until a String/Password/Numeric textarea
+  // gains focus (see OnTextareaFocused).
+  //
+  mSession.OnScreenKb = lv_keyboard_create (mSession.Screen);
+  lv_obj_set_size (mSession.OnScreenKb, LV_PCT (100), LV_PCT (40));
+  lv_obj_align (mSession.OnScreenKb, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_add_flag (mSession.OnScreenKb, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_event_cb (mSession.OnScreenKb, OnKeyboardCancel, LV_EVENT_CANCEL, NULL);
+  //
+  // Don't add the keyboard to the form's nav group: it's mouse-only.
+  // Arrow-key navigation between form fields keeps working unchanged.
+  //
 
   //
   // Load the screen.
