@@ -712,7 +712,7 @@ ShowPopup (
   //
   // Semi-transparent full-screen overlay that blocks clicks on form widgets.
   //
-  Overlay = lv_obj_create (lv_screen_active ());
+  Overlay = lv_obj_create (lv_layer_top ());
   lv_obj_set_size (Overlay, LV_PCT (100), LV_PCT (100));
   lv_obj_set_style_bg_color (Overlay, lv_color_black (), 0);
   lv_obj_set_style_bg_opa (Overlay, THEME_OVERLAY_OPA, 0);
