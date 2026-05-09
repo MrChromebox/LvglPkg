@@ -1,8 +1,16 @@
-# [LVGL](https://github.com/lvgl/lvgl) on UEFI Environment
+# LvglPkg — LVGL-based UEFI HII Form Renderer
+
+An EDK2 package that replaces the native text-based HII Form Browser UI with an
+[LVGL](https://github.com/lvgl/lvgl)-based graphical renderer.
+
+![Front Page](./docs/images/front-page.png)
 
 ## Project Goal
 
-Replace EDK2's native text-based HII Form Browser UI with an LVGL-based graphical renderer. The approach is **Display Engine Replacement** — we implement `EFI_DISPLAY_ENGINE_PROTOCOL` so that `SetupBrowserDxe` (the IFR parser, expression evaluator, and config router) continues working unchanged, while our code handles only the rendering layer via LVGL.
+Replace EDK2's `DisplayEngineDxe` with `LvglDisplayEngineDxe`, which produces
+`EFI_DISPLAY_ENGINE_PROTOCOL` and renders HII forms using LVGL widgets.
+`SetupBrowserDxe` (the IFR parser, expression evaluator, and config router)
+continues to operate unchanged — only the rendering layer is replaced.
 
 ### Architecture
 
@@ -12,7 +20,7 @@ BDS (F2/DEL) → EFI_FORM_BROWSER2_PROTOCOL (SetupBrowserDxe)
                     │  walks IFR, evaluates expressions, manages config
                     │
                     ▼
-              EFI_DISPLAY_ENGINE_PROTOCOL ← WE REPLACE THIS
+              EFI_DISPLAY_ENGINE_PROTOCOL ← REPLACED
               (LvglDisplayEngineDxe)
                     │
                     │  FORM_DISPLAY_ENGINE_FORM → LVGL widgets
@@ -21,7 +29,9 @@ BDS (F2/DEL) → EFI_FORM_BROWSER2_PROTOCOL (SetupBrowserDxe)
                   LVGL → EFI_GRAPHICS_OUTPUT_PROTOCOL → pixels on screen
 ```
 
-We do **not** reimplement IFR parsing. SetupBrowserDxe handles all of that. Our `FormDisplay()` receives a clean linked list of `FORM_DISPLAY_ENGINE_STATEMENT` structs — one per visible question — and maps each to an LVGL widget.
+IFR parsing is **not** reimplemented. `FormDisplay()` receives a clean linked
+list of `FORM_DISPLAY_ENGINE_STATEMENT` structs — one per visible question —
+and maps each to an LVGL widget.
 
 ### IFR Opcode → LVGL Widget Mapping
 
@@ -50,42 +60,128 @@ LvglPkg/
 ├── LvglDisplayEngineDxe/      Display engine DXE driver (the main deliverable)
 │   ├── LvglDisplayEngineDxe.c Protocol installation, entry/unload
 │   ├── LvglFormRenderer.c     FormDisplay() → LVGL widget builder + event loop
-│   └── LvglFormRenderer.h     Renderer types and API
-├── Application/               Demo UEFI shell applications
-├── Include/                   Public headers (LvglLib.h)
-└── LvglPkg.dsc / .dec / .fdf Package build files
+│   ├── LvglFormRenderer.h     Renderer types and API
+│   ├── LvglAptioChrome.c/.h   Aptio-style chrome (header/footer/nav bar)
+│   └── AptioWallpaper.c       Background image data
+├── Include/                   Public headers (LvglLib.h, LvglTheme.h)
+├── LvglPkg.dsc                Package build description
+├── LvglPkg.dec                Package declaration
+└── LICENSE                    MIT License
 ```
+
+## Prerequisites
+
+- **Linux host** (tested on Ubuntu 24.04). Build instructions assume bash.
+- **GCC** 13.x (a working `gcc`/`g++` toolchain). EDK2's `GCC5` tag was retired
+  in late 2024; this package builds with toolchain tag `GCC`.
+- **NASM** and **iASL** (`acpica-tools`) — required by EDK2's `BaseTools`.
+- **Python 3** — used by the EDK2 build orchestrator.
+- **QEMU** with `qemu-system-x86_64` for testing OVMF builds.
+- An EDK2 checkout with submodules initialised:
+  ```bash
+  git clone --recursive https://github.com/tianocore/edk2.git
+  cd edk2
+  make -C BaseTools                    # build the EDK2 build tools
+  ```
+- LvglPkg checked out either as a sibling directory or as a submodule of the
+  edk2 tree. The LVGL source is itself a submodule under `LvglPkg/Library/LvglLib/lvgl`,
+  so `--recursive` (or a follow-up `git submodule update --init --recursive`)
+  is required.
+
+## Integration
+
+Replacing the stock display engine in OVMF takes three coordinated edits.
+
+### 1. DSC — replace the display engine module
+
+In `OvmfPkg/OvmfPkgX64.dsc`, find and remove:
+```
+MdeModulePkg/Universal/DisplayEngineDxe/DisplayEngineDxe.inf
+```
+and replace it with:
+```
+LvglPkg/LvglDisplayEngineDxe/LvglDisplayEngineDxe.inf
+```
+
+### 2. FDF — replace the display engine in the firmware image
+
+In `OvmfPkg/OvmfPkgX64.fdf`, do the same swap:
+```
+# remove
+INF  MdeModulePkg/Universal/DisplayEngineDxe/DisplayEngineDxe.inf
+# add
+INF  LvglPkg/LvglDisplayEngineDxe/LvglDisplayEngineDxe.inf
+```
+
+### 3. USB mouse — switch to the AbsolutePointer driver
+
+LVGL needs `EFI_ABSOLUTE_POINTER_PROTOCOL`. EDK2 ships two USB mouse drivers,
+and they cannot coexist — `UsbMouseDxe` advertises a higher driver-binding
+`Version` than `UsbMouseAbsolutePointerDxe`, so the core picks it first and
+locks `UsbIo` `BY_DRIVER`, blocking the AbsolutePointer driver. Remove the
+former, add the latter.
+
+In `OvmfPkg/Include/Dsc/UsbComponents.dsc.inc` and
+`OvmfPkg/OvmfPkgX64.fdf` (under the DXE FV section):
+```
+# remove
+MdeModulePkg/Bus/Usb/UsbMouseDxe/UsbMouseDxe.inf
+# add
+MdeModulePkg/Bus/Usb/UsbMouseAbsolutePointerDxe/UsbMouseAbsolutePointerDxe.inf
+```
+
+QEMU must use `-device usb-mouse` (Boot/Mouse class), **not** `-device usb-tablet`
+— neither EDK2 mouse driver binds to tablet's HID report descriptor.
+
+> **Shortcut — add-only integration**
+>
+> If you'd rather not edit the stock OVMF lines, you can simply **add**
+> `LvglPkg/LvglDisplayEngineDxe/LvglDisplayEngineDxe.inf` to the DSC
+> `[Components]` section and the FDF DXE FV section without removing
+> `MdeModulePkg/Universal/DisplayEngineDxe/DisplayEngineDxe.inf`. Both
+> drivers will be built and dispatched, but only one `EFI_DISPLAY_ENGINE_PROTOCOL`
+> producer wins — whichever is installed last. In practice
+> `LvglDisplayEngineDxe` reliably takes over because it dispatches after the
+> stock module. The same shortcut applies to the mouse driver: leaving
+> `UsbMouseDxe` in place will block AbsolutePointer (driver-binding `Version`
+> sort), so for mouse input the swap in step 3 is **not** optional.
+
+### 4. PACKAGES_PATH
+
+Tell the EDK2 build where LvglPkg lives:
+```bash
+export PACKAGES_PATH=$HOME/workspace/edk2:$HOME/workspace/edk2/LvglPkg
+```
+(adjust paths if your checkout is elsewhere).
 
 ## Build
 
-#### X64-MSVC
-```
-build -p LvglPkg\LvglPkg.dsc -a X64 -t VS2022 -b RELEASE
-```
-
-#### X64-GCC
-```
+### Standalone — verify the package compiles
+```bash
 . edksetup.sh
 build -p LvglPkg/LvglPkg.dsc -a X64 -t GCC -b RELEASE
 ```
 
-#### AARCH64-GCC
-```
-export GCC_AARCH64_PREFIX=aarch64-none-linux-gnu-
-. edksetup.sh
-build -p LvglPkg/LvglPkg.dsc -a AARCH64 -t GCC -b RELEASE
-```
-
-#### Build OVMF with LvglDisplayEngineDxe
+### Integrated into OVMF — produces a bootable firmware image
 ```bash
 cd ~/workspace/edk2
-source edksetup.sh
+. edksetup.sh
 export PACKAGES_PATH=$HOME/workspace/edk2:$HOME/workspace/edk2/LvglPkg
 build -a X64 -t GCC -b DEBUG -p OvmfPkg/OvmfPkgX64.dsc
 ```
 
-#### Running in QEMU
+Outputs:
+- `Build/OvmfX64/DEBUG_GCC/FV/OVMF_CODE.fd` — read-only firmware (code)
+- `Build/OvmfX64/DEBUG_GCC/FV/OVMF_VARS.fd` — variable store (writable)
+
+## Run in QEMU
+
+Stage the variable store and any user `.efi` files, then launch:
+
 ```bash
+mkdir -p /tmp/efi_files
+cp Build/OvmfX64/DEBUG_GCC/FV/OVMF_VARS.fd /tmp/OVMF_VARS.fd
+
 qemu-system-x86_64 \
   -machine q35 \
   -m 512M \
@@ -96,64 +192,74 @@ qemu-system-x86_64 \
   -device qemu-xhci,id=xhci \
   -device usb-kbd,bus=xhci.0 \
   -device usb-mouse,bus=xhci.0 \
-  -machine usb=on \
-  -debugcon file:/tmp/debug.log -global isa-debugcon.iobase=0x402 \
   -display gtk \
-  -serial stdio 2>&1
+  -serial stdio
 ```
-Press F2 or DEL at the OVMF splash screen to enter Setup — the LVGL-based form browser renders the HII forms graphically.
 
-## LvglLib Usage
+Press **F2** or **DEL** at the OVMF splash to enter Setup — HII forms render
+through LVGL. Exit QEMU with `Ctrl+A` then `X` (when `-serial stdio` is used).
 
-1. Include LvglLib like other UEFI Library Class in your UEFI_APPLICATION
-2. In App ENTRY_POINT:
-   - ~~Call `UefiLvglInit()` to do init~~
-   - Call `UefiLvglAppRegister (MyApp)` to show `MyApp`
-   - ~~Call `UefiLvglDeinit()` to do deinit, and you may need another code to do clear up for `MyApp`~~
+## Troubleshooting
 
-## Demo
+- **Mouse cursor doesn't move / no response** — `UsbMouseDxe` is still in the
+  firmware. Check `OvmfPkg/Include/Dsc/UsbComponents.dsc.inc` and the FDF;
+  both `UsbMouseDxe` references must be replaced with `UsbMouseAbsolutePointerDxe`.
+  Also verify QEMU launches with `-device usb-mouse`, not `usb-tablet`.
+- **Black screen on entering Setup** — the stock `DisplayEngineDxe` was not
+  removed and is winning protocol-installation order, or LvglDisplayEngineDxe
+  failed to load. Re-check both DSC and FDF — the swap must happen in both
+  files.
+- **`build` fails with "package not found"** — `PACKAGES_PATH` is not set, or
+  doesn't contain the directory holding `LvglPkg/`. Echo it and verify.
+- **`fatal error: lvgl/lvgl.h: No such file or directory`** — the LVGL
+  submodule wasn't initialised. Run `git submodule update --init --recursive`
+  inside `LvglPkg`.
+- **Stale build artefacts** — when toggling between DSC variants, wipe the
+  output directory: `rm -rf Build/OvmfX64`.
 
-  ![BootManager](./Demo/Images/BootManager.png)
-  ![FrontPage](./Demo/Images/FrontPage.png)
+## Screenshots
 
-### Demo Usage
+**Boot Maintenance Manager** — mixed widgets (list, dropdown, numeric spinbox)
+with F9/F10 hotkeys in the footer:
 
-1. Download [OVMF.fd](./Demo/Bin/OVMF.fd)
-2. Create EfiFiles folder and copy `UefiDashboard.efi` binary to it
-3. qemu-system-x86_64 -bios OVMF.fd -hda fat:rw:EfiFiles -net none -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0 -device usb-mouse,bus=xhci.0 -serial stdio
-4. Boot to UEFI Shell
-5. `fs0:` then [Enter], `UefiDashboard.efi` then [Enter]
-6. Press `Esc` to exit `UefiDashboard`
+![Boot Maintenance Manager](./docs/images/boot-maintenance.png)
 
-## Current Status
+**Secure Boot Configuration** — checkbox + dropdown + grayed-out read-only row:
 
-`FormDisplay()` is working end-to-end: LVGL renders HII forms graphically with widget mapping for all major IFR opcodes. Keyboard navigation (UP/DOWN focus, ENTER to edit, ESC to exit), mouse input, and string field value commits are all functional. Active development is focused on F-key hotkeys and the visual theme.
+![Secure Boot Configuration](./docs/images/secure-boot.png)
 
-## TODO
-- [x] Absolute Pointer Mouse
-- [x] Simple Pointer Mouse
-- [x] Mouse Wheel
-- [x] Log/Debug Print
-- [x] LvglDisplayEngineDxe — EFI_DISPLAY_ENGINE_PROTOCOL skeleton
-- [x] FormDisplay() — IFR opcode → LVGL widget builder
-- [x] Fix mouse in display engine (cursor lost on screen switch)
-- [x] Keyboard navigation (UP/DOWN focus, ESC exits form, ENTER toggles editing on spinbox/dropdown/textarea)
-- [x] `EFI_IFR_ORDERED_LIST_OP` renderer (Boot Order / Driver Order) — Up/Down buttons per entry, reorder committed via `USER_INPUT.InputValue.Buffer`
-- [x] String field value commit — `OnStringReady` allocates pool buffer (`AllocateZeroPool(CurrentValue.BufferLen)`) and calls `HiiSetString`; satisfies SetupBrowserDxe's `FreePool(InputValue.Buffer)` and `CopyMem(BufferValue, Buffer, BufferLen)` contract
-- [ ] Function-key hotkeys (F9 Load Defaults, F10 Save, driver-registered hotkeys from `HotKeyListHead`)
-- [ ] Theme/styling pass (fonts, colors, readability)
-- [ ] File System
-- [ ] ~~VS2022~~/~~AARCH64-GCC~~/Clang
-- [ ] Code Clean(Remove Unused Source File in .inf)
-- [ ] ...
+## Status
+
+`FormDisplay()` works end-to-end. All major IFR opcodes map to LVGL widgets.
+Keyboard navigation (UP/DOWN focus, ENTER to edit, ESC to exit), mouse input,
+and string field commits are functional.
+
+### Done
+- [x] LvglDisplayEngineDxe — `EFI_DISPLAY_ENGINE_PROTOCOL` producer
+- [x] `FormDisplay()` IFR → LVGL widget builder
+- [x] AbsolutePointer / SimplePointer mouse input
+- [x] Mouse wheel
+- [x] Keyboard navigation (UP/DOWN focus, ESC exits, ENTER toggles editing)
+- [x] `EFI_IFR_ORDERED_LIST_OP` renderer with reorder commit
+- [x] String field value commit (`HiiSetString` + pool buffer)
+- [x] Aptio-style chrome (header/footer/nav)
+- [x] Function-key hotkeys (F9 Load Defaults, F10 Save, driver-registered hotkeys)
+- [x] Theme/styling pass (fonts, colors, readability)
+
+### TODO
+- [ ] VS2022 / AARCH64-GCC / Clang toolchain support
+- [ ] Source cleanup (remove unused entries from `.inf`)
 
 ## Origin
 
-Forked from [YangGangUEFI/LvglPkg](https://github.com/YangGangUEFI/LvglPkg), which provides the LVGL-to-UEFI port (GOP display driver, input handling). The display engine replacement and HII integration is original work.
+Originally forked from [YangGangUEFI/LvglPkg](https://github.com/YangGangUEFI/LvglPkg),
+which provides the LVGL-to-UEFI port (GOP display driver, input handling).
+This repository is now maintained independently. The display engine
+replacement and HII integration is original work by the current maintainer.
 
-## Note
-1. For Edk2 EmulatorPkg user, use the RELEASE build or build LvglPkg/Application/LvglDemoApp.inf in EmulatorPkg.dsc
+The original LVGL UEFI port code remains under its original copyright; see
+[LICENSE](./LICENSE).
 
 ## License
 
-BSD-2-Clause-Patent (same as EDK2).
+MIT License. See [LICENSE](./LICENSE).

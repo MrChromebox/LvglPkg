@@ -132,12 +132,6 @@
 
 [Components]
 
-  LvglPkg/Application/LvglDemoApp/LvglDemoApp.inf
-
-  LvglPkg/Application/LvglDemos/LvglDemos.inf
-
-  LvglPkg/Application/UefiDashboard/UefiDashboard.inf
-
   LvglPkg/LvglDisplayEngineDxe/LvglDisplayEngineDxe.inf
 
 [BuildOptions]
