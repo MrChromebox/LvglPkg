@@ -260,6 +260,16 @@ replacement and HII integration is original work by the current maintainer.
 The original LVGL UEFI port code remains under its original copyright; see
 [LICENSE](./LICENSE).
 
+## Star History
+
+<a href="https://www.star-history.com/?repos=hamitcan99%2FLvglPkg&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=hamitcan99/LvglPkg&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=hamitcan99/LvglPkg&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=hamitcan99/LvglPkg&type=date&legend=top-left" />
+ </picture>
+</a>
+
 ## License
 
 MIT License. See [LICENSE](./LICENSE).
