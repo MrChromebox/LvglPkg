@@ -1252,10 +1252,44 @@ OnFocusUpdateHelp (
   CHAR8                   *Utf8;
 
   Ctx = (LVGL_STATEMENT_CONTEXT *)lv_event_get_user_data (Event);
+
   if ((Ctx == NULL) || (Ctx->Statement == NULL) ||
       (mSession.FormData == NULL) || (mSession.FormData->HiiHandle == NULL))
   {
     AptioSetHelpText ("");
+    return;
+  }
+
+  Utf8 = GetHelpUtf8 (Ctx->Statement, mSession.FormData->HiiHandle);
+  AptioSetHelpText (Utf8 != NULL ? Utf8 : "");
+  if (Utf8 != NULL) {
+    FreePool (Utf8);
+  }
+}
+
+/**
+  LV_EVENT_HOVER_OVER handler — update the help pane text while the mouse
+  hovers over a statement row.  Bound to both the inner control widget (via
+  AddToNavGroup) AND the Row container (via BindRowHover) so the help pane
+  updates regardless of which part of the row the cursor is over.
+
+  Keyboard focus changes continue to update the pane via OnFocusUpdateHelp,
+  so the pane is never stale — it just retains the last-hovered row's text
+  when the cursor moves off all rows, which is the desired behaviour.
+**/
+STATIC
+VOID
+OnHoverUpdateHelp (
+  lv_event_t  *Event
+  )
+{
+  LVGL_STATEMENT_CONTEXT  *Ctx;
+  CHAR8                   *Utf8;
+
+  Ctx = (LVGL_STATEMENT_CONTEXT *)lv_event_get_user_data (Event);
+  if ((Ctx == NULL) || (Ctx->Statement == NULL) ||
+      (mSession.FormData == NULL) || (mSession.FormData->HiiHandle == NULL))
+  {
     return;
   }
 
@@ -1277,7 +1311,8 @@ AddToNavGroup (
   lv_group_add_obj (Group, Widget);
   lv_obj_add_event_cb (Widget, OnNavKey, LV_EVENT_KEY | LV_EVENT_PREPROCESS, Ctx);
   if (Ctx != NULL) {
-    lv_obj_add_event_cb (Widget, OnFocusUpdateHelp, LV_EVENT_FOCUSED, Ctx);
+    lv_obj_add_event_cb (Widget, OnFocusUpdateHelp, LV_EVENT_FOCUSED,   Ctx);
+    lv_obj_add_event_cb (Widget, OnHoverUpdateHelp, LV_EVENT_HOVER_OVER, Ctx);
   }
 
   if (mNavCount < LVGL_NAV_MAX) {
@@ -1414,16 +1449,23 @@ BindRowFocus (
 //
 // Bind inner widget's hover events to the wrapping Row so the whole row
 // highlights when the mouse is over any part of the inner control.
+// Also bind OnHoverUpdateHelp to the Row container itself so the help pane
+// updates when the cursor is over the prompt label or row padding (the
+// majority of the row's clickable area), not only over the inner control.
 //
 STATIC
 VOID
 BindRowHover (
-  lv_obj_t  *Widget,
-  lv_obj_t  *Row
+  lv_obj_t               *Widget,
+  lv_obj_t               *Row,
+  LVGL_STATEMENT_CONTEXT *Ctx
   )
 {
   lv_obj_add_event_cb (Widget, OnRowHoverChange, LV_EVENT_HOVER_OVER,  Row);
   lv_obj_add_event_cb (Widget, OnRowHoverChange, LV_EVENT_HOVER_LEAVE, Row);
+  if (Ctx != NULL) {
+    lv_obj_add_event_cb (Row, OnHoverUpdateHelp, LV_EVENT_HOVER_OVER, Ctx);
+  }
 }
 
 //
@@ -1550,7 +1592,7 @@ CreateCheckboxWidget (
 
   AddToNavGroup (Group, Cb, Ctx);
   BindRowFocus (Cb, Row);
-  BindRowHover (Cb, Row);
+  BindRowHover (Cb, Row, Ctx);
 
   if (Text != NULL) {
     FreePool (Text);
@@ -1643,7 +1685,7 @@ CreateNumericWidget (
 
   AddToNavGroup (Group, Ta, Ctx);
   BindRowFocus (Ta, Row);
-  BindRowHover (Ta, Row);
+  BindRowHover (Ta, Row, Ctx);
 
   if (Text != NULL) {
     FreePool (Text);
@@ -1786,7 +1828,7 @@ CreateOneOfWidget (
 
   AddToNavGroup (Group, Dd, Ctx);
   BindRowFocus (Dd, Row);
-  BindRowHover (Dd, Row);
+  BindRowHover (Dd, Row, Ctx);
 
   if (Text != NULL) {
     FreePool (Text);
@@ -2056,7 +2098,7 @@ CreateStringWidget (
 
   AddToNavGroup (Group, Ta, Ctx);
   BindRowFocus (Ta, Row);
-  BindRowHover (Ta, Row);
+  BindRowHover (Ta, Row, Ctx);
 
   if (Text != NULL) {
     FreePool (Text);
