@@ -1417,9 +1417,9 @@
 #define LV_USE_WINDOWS    0
 
 /** LVGL UEFI backend */
-#define LV_USE_UEFI 0
+#define LV_USE_UEFI 1
 #if LV_USE_UEFI
-    #define LV_USE_UEFI_INCLUDE "myefi.h"   /**< Header that hides the actual framework (EDK2, gnu-efi, ...) */
+    #define LV_USE_UEFI_INCLUDE "lv_uefi_edk2.h"   /**< EDK2 framework header bindings for LVGL UEFI backend */
     #define LV_UEFI_USE_MEMORY_SERVICES 0   /**< Use the memory functions from the boot services table */
 #endif
 

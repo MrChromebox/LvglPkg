@@ -44,18 +44,16 @@ UefiLvglInit (
   VOID
   )
 {
-  EFI_GRAPHICS_OUTPUT_PROTOCOL       *GraphicsOutput;
-  EFI_STATUS                         Status;
-  UINTN                              Width, Heigth;
+  EFI_HANDLE                         GopHandle;
+  lv_display_t                       *Display;
 
   if (mUefiLvglInitDone) {
     return EFI_SUCCESS;
   }
 
-  Status = gBS->LocateProtocol (&gEfiGraphicsOutputProtocolGuid, NULL, (VOID **) &GraphicsOutput);
-  if (EFI_ERROR(Status)) {
-    return EFI_UNSUPPORTED;
-  }
+  // lv_uefi_init must be called before lv_init() so the LVGL UEFI backend
+  // (lv_uefi_platform_init, invoked from lv_init) finds valid EFI globals.
+  lv_uefi_init (gImageHandle, gST);
 
   lv_init();
 
@@ -68,12 +66,21 @@ UefiLvglInit (
   lv_log_register_print_cb (efi_lv_log_print);
 #endif
 
-  Width  = GraphicsOutput->Mode->Info->HorizontalResolution;
-  Heigth = GraphicsOutput->Mode->Info->VerticalResolution;
+  // Use LVGL's built-in UEFI display driver. lv_uefi_display_get_any()
+  // returns the first handle with EFI_GRAPHICS_OUTPUT_PROTOCOL installed.
+  GopHandle = lv_uefi_display_get_any ();
+  if (GopHandle == NULL) {
+    lv_deinit ();
+    return EFI_UNSUPPORTED;
+  }
 
-  lv_disp_t *display = lv_uefi_disp_create (Width, Heigth);
+  Display = lv_uefi_display_create (GopHandle);
+  if (Display == NULL) {
+    lv_deinit ();
+    return EFI_UNSUPPORTED;
+  }
 
-  lv_port_indev_init(display);
+  lv_port_indev_init(Display);
 
   mUefiLvglInitDone = TRUE;
 
