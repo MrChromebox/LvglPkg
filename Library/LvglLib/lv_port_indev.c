@@ -1,26 +1,44 @@
 /**
  * @file lv_port_indev.c
  *
- * UEFI input device port using LVGL's built-in absolute-pointer indev for the
- * mouse and a custom keypad read callback for the keyboard.
+ * UEFI input device port: custom pointer indev for mouse + wheel,
+ * custom keypad indev for keyboard.
  *
- * Why a custom keyboard callback instead of lv_uefi_simple_text_input_indev:
- * The built-in driver queues a PRESSED+RELEASED pair for every EFI keystroke
- * and delivers them in the same LVGL tick via continue_reading.  LVGL's
- * indev_keypad_proc never sees the key as held across ticks, so its
- * long_press_repeat throttle never engages.  EFI auto-repeat then fires at the
- * firmware's raw repeat rate (~33 Hz), causing runaway navigation.
+ * --- Pointer ---
+ * A single custom read callback (mouse_read) owns the one call to
+ * EFI_ABSOLUTE_POINTER_PROTOCOL.GetState() per frame.  This is required
+ * because GetState() is single-consumer: the physical USB driver clears its
+ * StateChanged flag on each read, and ConSplitter forwards that read to the
+ * underlying device.  A separate wheel-poller would therefore steal ~half the
+ * pointer's state-change events, degrading cursor tracking.
  *
- * The custom keypad_read returns PRESSED while the EFI buffer has a key and
- * RELEASED when it is empty.  LVGL's long-press timer governs the repeat rate
- * while the user holds a key, and navigation stops once the buffer drains.
+ * mouse_read handles X/Y rescaling, left-button state, AND Z accumulation for
+ * the wheel in a single GetState call.  The built-in LVGL display backend
+ * (lv_uefi_display_create, LV_USE_UEFI=1) is unchanged; only the pointer indev
+ * reverts to custom.
  *
- * Pointer: EFI_ABSOLUTE_POINTER_PROTOCOL via lv_uefi_absolute_pointer_indev.
- * The PR#17 lazy-binding pattern (RegisterProtocolNotify) is preserved so USB
- * binding during BDS ConnectAll is handled correctly.
+ * Wheel ratchet: accumulate raw Z counts, emit one scroll step (±40 px) per
+ * LVGL_WHEEL_COUNTS_PER_DETENT=8 raw counts.  Scroll is applied directly to the
+ * nearest scrollable ancestor under the cursor via lv_obj_scroll_by_bounded(),
+ * bypassing LVGL's normal click-first-to-scroll-later requirement.
  *
- * NOTE: Mouse wheel scrolling is not yet re-ported; it will return in a
- * follow-up branch.
+ * Divide-by-zero guard: ConSplitter publishes its virtual AbsolutePointer early
+ * with AbsoluteMaxX/Y == 0 until a physical USB mouse binds.  mouse_read checks
+ * the live range each frame and simply reports the last cursor position /
+ * RELEASED state when the range is zero, so the indev "just starts working"
+ * once USB binds — no retry logic is needed.
+ *
+ * PR#17 lazy-binding (RegisterProtocolNotify) is kept as cheap insurance for
+ * the case where the protocol itself is absent at init time; the callback
+ * re-grabs mAbsPointer via HandleProtocol.
+ *
+ * --- Keyboard ---
+ * Custom keypad_read returns PRESSED while the EFI console buffer has a key and
+ * RELEASED when it is empty.  LVGL's long_press_repeat throttle governs the
+ * repeat rate while the user holds a key.  The built-in
+ * lv_uefi_simple_text_input_indev was tried but causes runaway navigation
+ * because it queues PRESSED+RELEASED in the same tick, bypassing LVGL's rate
+ * limiting.
  */
 
 
@@ -38,6 +56,19 @@
 
 extern const lv_img_dsc_t mouse_cursor_icon;
 
+//
+// Wheel ratchet: accumulate this many raw Z counts before emitting one scroll
+// step.  Lower = more sensitive.  QEMU usb-mouse can send several reports per
+// perceived host wheel motion, so ratcheting prevents over-scrolling.
+//
+#define LVGL_WHEEL_COUNTS_PER_DETENT  8
+
+//
+// Pixels to scroll per detent.  lv_obj_scroll_by_bounded is called directly so
+// this value is applied immediately without LVGL's normal indev click precondition.
+//
+#define LVGL_WHEEL_SCROLL_PIXELS      40
+
 /**********************
  *  STATIC VARIABLES
  **********************/
@@ -46,18 +77,160 @@ static lv_indev_t *indev_mouse  = NULL;
 static lv_indev_t *indev_keypad = NULL;
 
 //
-// PR#17 lazy-binding state. The pointer indev is created empty; handles are
-// added via RegisterProtocolNotify when EFI_ABSOLUTE_POINTER_PROTOCOL appears
-// (i.e. when USB binds during BDS ConnectAll, after which ConSplitterDxe
-// updates its aggregate and its Mode becomes valid).
+// Pointer state — owned exclusively by mouse_read.
+//
+STATIC EFI_ABSOLUTE_POINTER_PROTOCOL *mAbsPointer   = NULL;
+STATIC INTN                           mLastCursorX   = 0;
+STATIC INTN                           mLastCursorY   = 0;
+STATIC UINT64                         mLastAbsZ      = 0;
+STATIC INT32                          mWheelDelta    = 0;
+STATIC BOOLEAN                        mLeftButton    = FALSE;
+
+//
+// PR#17 lazy-binding state.
 //
 STATIC EFI_EVENT    mPointerNotifyEvent        = NULL;
 STATIC VOID        *mPointerNotifyRegistration = NULL;
-STATIC BOOLEAN      mPointerAdded              = FALSE;
 
 /**********************
  *   STATIC FUNCTIONS
  **********************/
+
+//
+// Walk from the object under the cursor up to the nearest scrollable ancestor
+// that actually has content to scroll.  Returns NULL if none found.
+//
+static lv_obj_t *
+find_scrollable_at_point (
+  lv_display_t  *disp,
+  lv_point_t    *p
+  )
+{
+  lv_obj_t *screen = lv_display_get_screen_active (disp);
+  if (screen == NULL) return NULL;
+
+  lv_obj_t *hit = lv_indev_search_obj (screen, p);
+  if (hit == NULL) return NULL;
+
+  for (lv_obj_t *o = hit; o != NULL; o = lv_obj_get_parent (o)) {
+    if (lv_obj_has_flag (o, LV_OBJ_FLAG_SCROLLABLE) &&
+        lv_obj_get_scroll_top (o) + lv_obj_get_scroll_bottom (o) > 0)
+    {
+      return o;
+    }
+  }
+  return NULL;
+}
+
+//
+// Custom pointer read callback.
+//
+// Performs a single GetState() per frame, updating cursor position, button
+// state, and the wheel accumulator.  Applies wheel scroll when the ratchet
+// threshold is crossed.
+//
+static void
+mouse_read (
+  lv_indev_t      *indev_drv,
+  lv_indev_data_t *data
+  )
+{
+  EFI_STATUS                   Status;
+  EFI_ABSOLUTE_POINTER_STATE   AbsState;
+  UINT64                       RangeX;
+  UINT64                       RangeY;
+  int                          wheel_step;
+  lv_display_t                *disp;
+  INT32                        hor_res;
+  INT32                        ver_res;
+
+  //
+  // Lazy-acquire the protocol — succeeds after USB/ConSplitter have bound.
+  //
+  if (mAbsPointer == NULL) {
+    gBS->HandleProtocol (
+           gST->ConsoleInHandle,
+           &gEfiAbsolutePointerProtocolGuid,
+           (VOID **)&mAbsPointer);
+  }
+
+  //
+  // Report last position + RELEASED if the protocol is still absent or the
+  // ConSplitter's virtual range is zero (USB not yet bound).
+  //
+  if (mAbsPointer == NULL ||
+      mAbsPointer->Mode->AbsoluteMaxX == 0 ||
+      mAbsPointer->Mode->AbsoluteMaxY == 0)
+  {
+    data->point.x = (lv_coord_t)mLastCursorX;
+    data->point.y = (lv_coord_t)mLastCursorY;
+    data->state   = LV_INDEV_STATE_RELEASED;
+    return;
+  }
+
+  RangeX = mAbsPointer->Mode->AbsoluteMaxX - mAbsPointer->Mode->AbsoluteMinX;
+  RangeY = mAbsPointer->Mode->AbsoluteMaxY - mAbsPointer->Mode->AbsoluteMinY;
+
+  disp    = lv_indev_get_display (indev_drv);
+  hor_res = lv_display_get_horizontal_resolution (disp);
+  ver_res = lv_display_get_vertical_resolution (disp);
+
+  Status = mAbsPointer->GetState (mAbsPointer, &AbsState);
+  if (!EFI_ERROR (Status)) {
+    //
+    // Rescale absolute X/Y to display pixels, clamp to screen edge.
+    //
+    mLastCursorX = (INTN)((AbsState.CurrentX * (UINT64)hor_res) / RangeX);
+    if (mLastCursorX > hor_res - 1) mLastCursorX = hor_res - 1;
+    if (mLastCursorX < 0)           mLastCursorX = 0;
+
+    mLastCursorY = (INTN)((AbsState.CurrentY * (UINT64)ver_res) / RangeY);
+    if (mLastCursorY > ver_res - 1) mLastCursorY = ver_res - 1;
+    if (mLastCursorY < 0)           mLastCursorY = 0;
+
+    mLeftButton = (AbsState.ActiveButtons & BIT0) != 0;
+
+    //
+    // Accumulate wheel delta from Z axis.
+    // UsbMouseAbsolutePointerDxe clamps CurrentZ to [0, AbsoluteMaxZ=1024]
+    // and integrates the HID wheel byte each interrupt, so the delta between
+    // successive reads is the wheel motion since the last frame.
+    //
+    mWheelDelta += (INT32)((INT64)AbsState.CurrentZ - (INT64)mLastAbsZ);
+    mLastAbsZ    = AbsState.CurrentZ;
+  }
+  // On EFI_NOT_READY (no state change since last call) keep last values.
+
+  data->point.x = (lv_coord_t)mLastCursorX;
+  data->point.y = (lv_coord_t)mLastCursorY;
+  data->state   = mLeftButton ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+  data->enc_diff = 0;
+
+  //
+  // Ratchet: emit one scroll step per LVGL_WHEEL_COUNTS_PER_DETENT raw counts.
+  //
+  wheel_step = 0;
+  if (mWheelDelta >= LVGL_WHEEL_COUNTS_PER_DETENT) {
+    wheel_step    =  1;
+    mWheelDelta  -= LVGL_WHEEL_COUNTS_PER_DETENT;
+  } else if (mWheelDelta <= -LVGL_WHEEL_COUNTS_PER_DETENT) {
+    wheel_step    = -1;
+    mWheelDelta  += LVGL_WHEEL_COUNTS_PER_DETENT;
+  }
+
+  if (wheel_step != 0) {
+    lv_point_t p = { (lv_coord_t)mLastCursorX, (lv_coord_t)mLastCursorY };
+    lv_obj_t  *target = find_scrollable_at_point (disp, &p);
+    if (target != NULL) {
+      lv_obj_scroll_by_bounded (
+        target,
+        0,
+        wheel_step * LVGL_WHEEL_SCROLL_PIXELS,
+        LV_ANIM_OFF
+        );
+    }
+  }
+}
 
 //
 // Custom keyboard read callback.
@@ -162,8 +335,9 @@ lv_uefi_keyboard_create (void)
 //
 // Protocol-install notification: fires each time any driver installs
 // EFI_ABSOLUTE_POINTER_PROTOCOL (e.g. UsbMouseAbsolutePointerDxe during BDS).
-// Keep retrying add_handle on the ConSplitter aggregate until it succeeds —
-// it returns FALSE while the aggregate Mode is still zero-range.
+// Re-grabs mAbsPointer in case it was absent at init.  The live Mode range
+// check in mouse_read handles the "range zero until USB fully binds" case
+// without further retry here.
 //
 STATIC
 VOID
@@ -173,10 +347,11 @@ OnPointerProtocolInstalled (
   IN VOID       *Context
   )
 {
-  if (!mPointerAdded && indev_mouse != NULL) {
-    if (lv_uefi_absolute_pointer_indev_add_handle (indev_mouse, gST->ConsoleInHandle)) {
-      mPointerAdded = TRUE;
-    }
+  if (mAbsPointer == NULL) {
+    gBS->HandleProtocol (
+           gST->ConsoleInHandle,
+           &gEfiAbsolutePointerProtocolGuid,
+           (VOID **)&mAbsPointer);
   }
 }
 
@@ -186,11 +361,9 @@ OnPointerProtocolInstalled (
 
 void lv_port_indev_init (lv_display_t *disp)
 {
-  lv_point_t res;
   EFI_STATUS Status;
-
-  res.x = (lv_coord_t)lv_display_get_horizontal_resolution (disp);
-  res.y = (lv_coord_t)lv_display_get_vertical_resolution (disp);
+  INT32      hor_res;
+  INT32      ver_res;
 
   //
   // Keyboard: custom indev that reads one EFI keystroke per tick and returns
@@ -199,11 +372,13 @@ void lv_port_indev_init (lv_display_t *disp)
   indev_keypad = lv_uefi_keyboard_create ();
 
   //
-  // Pointer: create an empty indev sized to the display resolution, wire it
-  // to the display, and attach the software cursor image.
+  // Pointer: custom indev that owns the single GetState() call per frame,
+  // handling X/Y/buttons and the wheel Z axis together.
   //
-  indev_mouse = lv_uefi_absolute_pointer_indev_create (&res);
+  indev_mouse = lv_indev_create ();
   if (indev_mouse != NULL) {
+    lv_indev_set_type (indev_mouse, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb (indev_mouse, mouse_read);
     lv_indev_set_display (indev_mouse, disp);
 
     LV_IMG_DECLARE(mouse_cursor_icon);
@@ -211,15 +386,29 @@ void lv_port_indev_init (lv_display_t *disp)
     lv_image_set_src (cursor_obj, &mouse_cursor_icon);
     lv_indev_set_cursor (indev_mouse, cursor_obj);
 
-    // Try to add the ConSplitter handle now; USB may already be bound.
-    if (lv_uefi_absolute_pointer_indev_add_handle (indev_mouse, gST->ConsoleInHandle)) {
-      mPointerAdded = TRUE;
-    }
+    //
+    // Centre the cursor and zero the wheel accumulator.
+    //
+    hor_res = lv_display_get_horizontal_resolution (disp);
+    ver_res = lv_display_get_vertical_resolution (disp);
+    mLastCursorX = hor_res / 2;
+    mLastCursorY = ver_res / 2;
+    mWheelDelta  = 0;
+    mLastAbsZ    = 0;
+    mLeftButton  = FALSE;
   }
 
   //
+  // Try to grab the AbsolutePointer protocol now; USB may already be bound.
+  //
+  gBS->HandleProtocol (
+         gST->ConsoleInHandle,
+         &gEfiAbsolutePointerProtocolGuid,
+         (VOID **)&mAbsPointer);
+
+  //
   // Arm a protocol-install notification so OnPointerProtocolInstalled retries
-  // add_handle once USB binds during BDS (the PR#17 lazy-binding pattern).
+  // the HandleProtocol lookup once USB binds during BDS (PR#17 pattern).
   //
   if (mPointerNotifyEvent == NULL) {
     Status = gBS->CreateEvent (
@@ -278,7 +467,9 @@ void lv_port_indev_close (void)
     mPointerNotifyRegistration = NULL;
   }
 
-  mPointerAdded = FALSE;
-  indev_mouse   = NULL;
-  indev_keypad  = NULL;
+  mAbsPointer  = NULL;
+  mWheelDelta  = 0;
+  mLastAbsZ    = 0;
+  indev_mouse  = NULL;
+  indev_keypad = NULL;
 }
