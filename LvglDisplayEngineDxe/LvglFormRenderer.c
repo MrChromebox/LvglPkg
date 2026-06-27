@@ -964,6 +964,33 @@ OnIndevFallbackKey (
   // skip disabled widgets; we walk our own ordered list instead.
   //
   if ((Key == LV_KEY_UP) || (Key == LV_KEY_DOWN)) {
+    //
+    // Special case: a focused, closed, non-editing ONE_OF dropdown cycles
+    // its selected value instead of moving row focus.  lv_dropdown_set_selected
+    // does not fire LV_EVENT_VALUE_CHANGED on its own, so we send it explicitly
+    // so that OnDropdownChanged commits the value and exits to SetupBrowserDxe.
+    //
+    if ((Focused != NULL) &&
+        lv_obj_check_type (Focused, &lv_dropdown_class) &&
+        !lv_dropdown_is_open (Focused) &&
+        !lv_group_get_editing (mSession.Group))
+    {
+      UINT32  Count = (UINT32)lv_dropdown_get_option_count (Focused);
+      if (Count > 0) {
+        UINT32  Sel = (UINT32)lv_dropdown_get_selected (Focused);
+        if (Key == LV_KEY_DOWN) {
+          Sel = (Sel + 1) % Count;
+        } else {
+          Sel = (Sel == 0) ? (Count - 1) : (Sel - 1);
+        }
+
+        lv_dropdown_set_selected (Focused, Sel);
+        lv_obj_send_event (Focused, LV_EVENT_VALUE_CHANGED, NULL);
+      }
+
+      return;
+    }
+
     if (mNavCount > 0) {
       UINTN  Idx   = 0;
       UINTN  Found = mNavCount;
