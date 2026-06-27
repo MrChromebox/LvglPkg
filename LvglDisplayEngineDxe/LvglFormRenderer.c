@@ -30,6 +30,14 @@ STATIC lv_obj_t  *mNavList[LVGL_NAV_MAX];
 STATIC UINTN     mNavCount = 0;
 
 //
+// Keyboard-edit tracking for ONE_OF dropdowns.
+// When ENTER enters editing, we snapshot the selection so ESC can revert it.
+// Only one dropdown can be keyboard-edited at a time.
+//
+STATIC lv_obj_t  *mEditingDropdown        = NULL;
+STATIC UINT32     mEditingDropdownOrigSel = 0;
+
+//
 // Popup state — shared by the F10 in-loop overlay and LvglRunConfirmPopup.
 //
 #define LVGL_POPUP_PENDING  0xFFFFFFFFU
@@ -965,15 +973,14 @@ OnIndevFallbackKey (
   //
   if ((Key == LV_KEY_UP) || (Key == LV_KEY_DOWN)) {
     //
-    // Special case: a focused, closed, non-editing ONE_OF dropdown cycles
-    // its selected value instead of moving row focus.  lv_dropdown_set_selected
-    // does not fire LV_EVENT_VALUE_CHANGED on its own, so we send it explicitly
-    // so that OnDropdownChanged commits the value and exits to SetupBrowserDxe.
+    // Special case: a ONE_OF dropdown that is currently in keyboard-editing
+    // mode (entered via ENTER) cycles its selection LOCALLY — no commit, no
+    // form rebuild.  Commit is deferred to the ENTER-confirm or leave paths
+    // in OnNavKey / OnDropdownDefocused.
     //
     if ((Focused != NULL) &&
         lv_obj_check_type (Focused, &lv_dropdown_class) &&
-        !lv_dropdown_is_open (Focused) &&
-        !lv_group_get_editing (mSession.Group))
+        lv_group_get_editing (mSession.Group))
     {
       UINT32  Count = (UINT32)lv_dropdown_get_option_count (Focused);
       if (Count > 0) {
@@ -985,7 +992,7 @@ OnIndevFallbackKey (
         }
 
         lv_dropdown_set_selected (Focused, Sel);
-        lv_obj_send_event (Focused, LV_EVENT_VALUE_CHANGED, NULL);
+        // Do NOT send LV_EVENT_VALUE_CHANGED here — commit is deferred.
       }
 
       return;
@@ -1217,6 +1224,15 @@ OnNavKey (
     }
 
     if (Editing) {
+      //
+      // ESC during dropdown keyboard-edit: revert the selection to the value
+      // that was current when the user pressed ENTER to start editing.
+      //
+      if ((mEditingDropdown != NULL) && (Focused == mEditingDropdown)) {
+        lv_dropdown_set_selected (mEditingDropdown, mEditingDropdownOrigSel);
+        mEditingDropdown = NULL;
+      }
+
       lv_group_set_editing (mSession.Group, false);
     } else {
       mSession.UserInput->Action            = BROWSER_ACTION_FORM_EXIT;
@@ -1234,6 +1250,38 @@ OnNavKey (
   }
 
   if (Editing) {
+    //
+    // While a dropdown is in keyboard-edit mode, intercept ENTER (confirm)
+    // and UP/DOWN (already handled by OnIndevFallbackKey — stop them here so
+    // LVGL's own class handler doesn't also advance or open the list).
+    //
+    Focused = lv_group_get_focused (mSession.Group);
+    if ((Focused != NULL) && lv_obj_check_type (Focused, &lv_dropdown_class)) {
+      if (Key == LV_KEY_ENTER) {
+        //
+        // Confirm: commit the current selection once, exit editing.
+        //
+        mEditingDropdown = NULL;
+        lv_group_set_editing (mSession.Group, false);
+        lv_obj_send_event (Focused, LV_EVENT_VALUE_CHANGED, NULL);
+        lv_event_stop_processing (Event);
+        return;
+      }
+
+      if ((Key == LV_KEY_UP) || (Key == LV_KEY_DOWN)) {
+        //
+        // OnIndevFallbackKey already cycled the selection; stop processing
+        // here so the LVGL dropdown class handler doesn't also advance/open.
+        //
+        lv_event_stop_processing (Event);
+        return;
+      }
+    }
+
+    //
+    // All other editing widget key handling (spinbox LEFT/RIGHT, etc.) falls
+    // through to the LVGL class handler unchanged.
+    //
     return;
   }
 
@@ -1255,6 +1303,14 @@ OnNavKey (
         (lv_obj_check_type (Focused, &lv_dropdown_class) ||
          lv_obj_check_type (Focused, &lv_spinbox_class)))
     {
+      //
+      // For dropdowns, snapshot the current selection so ESC can revert it.
+      //
+      if (lv_obj_check_type (Focused, &lv_dropdown_class)) {
+        mEditingDropdown        = Focused;
+        mEditingDropdownOrigSel = (UINT32)lv_dropdown_get_selected (Focused);
+      }
+
       lv_group_set_editing (mSession.Group, true);
       lv_event_stop_processing (Event);
     }
@@ -1677,6 +1733,27 @@ CreateNumericWidget (
   }
 }
 
+/**
+  LV_EVENT_DEFOCUSED handler for ONE_OF dropdowns.
+  If the user moves away (mouse click, Tab, etc.) while a dropdown is in
+  keyboard-editing mode, commit the current selection once and clear the
+  tracking pointer so it isn't committed a second time.
+**/
+STATIC
+VOID
+OnDropdownDefocused (
+  lv_event_t  *Event
+  )
+{
+  lv_obj_t  *Dd;
+
+  Dd = lv_event_get_target_obj (Event);
+  if (Dd == mEditingDropdown) {
+    mEditingDropdown = NULL;
+    lv_obj_send_event (Dd, LV_EVENT_VALUE_CHANGED, NULL);
+  }
+}
+
 STATIC
 VOID
 CreateOneOfWidget (
@@ -1810,6 +1887,7 @@ CreateOneOfWidget (
   }
 
   lv_obj_add_event_cb (Dd, OnDropdownOpened, LV_EVENT_READY, NULL);
+  lv_obj_add_event_cb (Dd, OnDropdownDefocused, LV_EVENT_DEFOCUSED, NULL);
 
   AddToNavGroup (Group, Dd, Ctx);
   BindRowFocus (Dd, Row);
@@ -2271,6 +2349,7 @@ LvglRenderForm (
   mSession.UserInput      = UserInputData;
   mSession.ExitRequested  = FALSE;
   mNavCount               = 0;
+  mEditingDropdown        = NULL;
 
   ZeroMem (UserInputData, sizeof (USER_INPUT));
 
