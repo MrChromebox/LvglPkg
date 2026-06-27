@@ -36,9 +36,10 @@
 #define THEME_COLOR_TEXT_POPUP     THEME_COLOR_TEXT_PRIMARY
 
 //
-// Row colors (default vs focused).
+// Row colors (default / hovered / focused).
 //
 #define THEME_COLOR_ROW_BG            THEME_COLOR_BG_PANEL
+#define THEME_COLOR_ROW_BG_HOVER      0x1E2A3C
 #define THEME_COLOR_ROW_TEXT          THEME_COLOR_TEXT_PRIMARY
 #define THEME_COLOR_ROW_TEXT_FOCUSED  0xFFFFFF
 #define THEME_COLOR_ROW_TEXT_DISABLED THEME_COLOR_TEXT_DISABLED

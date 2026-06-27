@@ -1317,6 +1317,12 @@ StyleRow (
   lv_obj_set_style_text_color (Row, lv_color_hex (THEME_COLOR_ROW_TEXT), 0);
   lv_obj_set_style_shadow_width (Row, 0, 0);
 
+  // hovered: slight elevation, no border — shows intent before click/focus
+  lv_obj_set_style_bg_color (Row, lv_color_hex (THEME_COLOR_ROW_BG_HOVER), LV_STATE_HOVERED);
+  lv_obj_set_style_bg_opa (Row, LV_OPA_COVER, LV_STATE_HOVERED);
+  lv_obj_set_style_text_color (Row, lv_color_hex (THEME_COLOR_ROW_TEXT_FOCUSED), LV_STATE_HOVERED);
+  lv_obj_set_style_shadow_width (Row, 0, LV_STATE_HOVERED);
+
   // focused: elevated panel + accent left bar + brighter text
   lv_obj_set_style_bg_color (Row, lv_color_hex (THEME_COLOR_BG_PANEL_ELEV), LV_STATE_FOCUSED);
   lv_obj_set_style_bg_opa (Row, LV_OPA_COVER, LV_STATE_FOCUSED);
@@ -1366,6 +1372,31 @@ OnRowFocusChange (
 }
 
 //
+// Propagate pointer hover from an inner widget to its wrapping Row so the
+// entire row highlights, not just the part directly under the cursor.
+//
+STATIC
+VOID
+OnRowHoverChange (
+  lv_event_t  *Event
+  )
+{
+  lv_obj_t         *Row;
+  lv_event_code_t  Code;
+
+  Row  = (lv_obj_t *)lv_event_get_user_data (Event);
+  Code = lv_event_get_code (Event);
+  if (Row == NULL) {
+    return;
+  }
+  if (Code == LV_EVENT_HOVER_OVER) {
+    lv_obj_add_state (Row, LV_STATE_HOVERED);
+  } else if (Code == LV_EVENT_HOVER_LEAVE) {
+    lv_obj_remove_state (Row, LV_STATE_HOVERED);
+  }
+}
+
+//
 // Bind the inner navigable widget's focus events to a wrapping Row so
 // the whole row paints highlighted, not just the inner control.
 //
@@ -1378,6 +1409,21 @@ BindRowFocus (
 {
   lv_obj_add_event_cb (Widget, OnRowFocusChange, LV_EVENT_FOCUSED, Row);
   lv_obj_add_event_cb (Widget, OnRowFocusChange, LV_EVENT_DEFOCUSED, Row);
+}
+
+//
+// Bind inner widget's hover events to the wrapping Row so the whole row
+// highlights when the mouse is over any part of the inner control.
+//
+STATIC
+VOID
+BindRowHover (
+  lv_obj_t  *Widget,
+  lv_obj_t  *Row
+  )
+{
+  lv_obj_add_event_cb (Widget, OnRowHoverChange, LV_EVENT_HOVER_OVER,  Row);
+  lv_obj_add_event_cb (Widget, OnRowHoverChange, LV_EVENT_HOVER_LEAVE, Row);
 }
 
 //
@@ -1504,6 +1550,7 @@ CreateCheckboxWidget (
 
   AddToNavGroup (Group, Cb, Ctx);
   BindRowFocus (Cb, Row);
+  BindRowHover (Cb, Row);
 
   if (Text != NULL) {
     FreePool (Text);
@@ -1596,6 +1643,7 @@ CreateNumericWidget (
 
   AddToNavGroup (Group, Ta, Ctx);
   BindRowFocus (Ta, Row);
+  BindRowHover (Ta, Row);
 
   if (Text != NULL) {
     FreePool (Text);
@@ -1738,6 +1786,7 @@ CreateOneOfWidget (
 
   AddToNavGroup (Group, Dd, Ctx);
   BindRowFocus (Dd, Row);
+  BindRowHover (Dd, Row);
 
   if (Text != NULL) {
     FreePool (Text);
@@ -2007,6 +2056,7 @@ CreateStringWidget (
 
   AddToNavGroup (Group, Ta, Ctx);
   BindRowFocus (Ta, Row);
+  BindRowHover (Ta, Row);
 
   if (Text != NULL) {
     FreePool (Text);
