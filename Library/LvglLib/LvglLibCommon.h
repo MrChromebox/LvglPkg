@@ -13,11 +13,8 @@
 #include <Library/MemoryAllocationLib.h>
 #include <Library/DebugLib.h>
 #include <Library/BaseLib.h>
-#include <Library/UefiApplicationEntryPoint.h>
-#include <Library/TimerLib.h>
 #include <Protocol/GraphicsOutput.h>
 #include <Protocol/SimpleTextInEx.h>
-#include <Protocol/SimplePointer.h>
 #include <Protocol/AbsolutePointer.h>
 
 #include "LvglUefiPort.h"
