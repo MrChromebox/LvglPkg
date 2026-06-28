@@ -5,6 +5,8 @@
 
 extern UINT8  mExitBtnYes;
 
+// mTickSupport stays FALSE permanently (tick_get_cb / UefiLvglTickInit removed).
+// Kept because LvglDisplayEngineDxe/LvglFormRenderer.c references it via extern.
 BOOLEAN  mTickSupport = FALSE;
 STATIC BOOLEAN  mUefiLvglInitDone = FALSE;
 
@@ -18,24 +20,6 @@ static void efi_lv_log_print(lv_log_level_t level, const char * buf)
     DebugPrint (priority[level], "[LVGL] %a\n", buf);
 }
 #endif
-
-
-static uint32_t tick_get_cb(void)
-{
-  return (UINT32) DivU64x32 (GetTimeInNanoSecond (GetPerformanceCounter()), 1000 * 1000);
-}
-
-VOID
-EFIAPI
-UefiLvglTickInit (
-  VOID
-  )
-{
-  if (GetPerformanceCounter()) {
-    mTickSupport = TRUE;
-    lv_tick_set_cb(tick_get_cb);
-  }
-}
 
 
 EFI_STATUS
@@ -56,11 +40,6 @@ UefiLvglInit (
   lv_uefi_init (gImageHandle, gST);
 
   lv_init();
-
-#if 0
-  // Need real TimerLib
-  UefiLvglTickInit();
-#endif
 
 #if LV_USE_LOG
   lv_log_register_print_cb (efi_lv_log_print);

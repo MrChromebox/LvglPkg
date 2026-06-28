@@ -515,15 +515,12 @@
   DebugLib
   PrintLib
   BaseLib
-  TimerLib
 
 [Guids]
 
 [Protocols]
   gEfiGraphicsOutputProtocolGuid
   gEfiAbsolutePointerProtocolGuid
-  gEfiSimplePointerProtocolGuid
-  gEfiDevicePathProtocolGuid
   gEfiSimpleTextInputExProtocolGuid
 
 [BuildOptions]
