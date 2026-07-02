@@ -32,6 +32,24 @@ STATIC FORM_DISPLAY_ENGINE_STATEMENT  *mNavStatement[LVGL_NAV_MAX];
 STATIC UINTN                          mNavCount = 0;
 
 //
+// Live banner refresh. Front-page banner lines (e.g. the battery status) are
+// updated in place by their producer via HiiSetString while the form stays
+// open. The banner labels are built once, so we poll their HII strings on a
+// timer and update the labels when the text changes -- otherwise the graphical
+// banner would show a stale value.
+//
+#define LVGL_BANNER_MAX  16
+typedef struct {
+  lv_obj_t        *Label;
+  EFI_HII_HANDLE  HiiHandle;
+  EFI_STRING_ID   StringId;
+} LVGL_BANNER_ENTRY;
+
+STATIC LVGL_BANNER_ENTRY  mBannerRegistry[LVGL_BANNER_MAX];
+STATIC UINTN              mBannerCount = 0;
+STATIC lv_timer_t         *mBannerTimer = NULL;
+
+//
 // Keyboard-edit tracking for ONE_OF dropdowns.
 // When ENTER enters editing, we snapshot the selection so ESC can revert it.
 // Only one dropdown can be keyboard-edited at a time.
@@ -1841,7 +1859,62 @@ CreateBannerWidget (
       break;
   }
 
+  //
+  // Register the label so BannerRefreshTimerCb can keep it in sync with its
+  // (possibly changing) HII string, e.g. live battery status.
+  //
+  if (mBannerCount < LVGL_BANNER_MAX) {
+    mBannerRegistry[mBannerCount].Label     = Label;
+    mBannerRegistry[mBannerCount].HiiHandle = HiiHandle;
+    mBannerRegistry[mBannerCount].StringId  = Banner->Title;
+    mBannerCount++;
+  }
+
   FreePool (Utf8);
+}
+
+/**
+  Timer callback: re-read each registered banner's HII string and update its
+  label when the text has changed. Runs while a form with banners is open
+  (typically the front page) so live values such as battery status stay
+  current without a full form rebuild.
+**/
+STATIC
+VOID
+BannerRefreshTimerCb (
+  lv_timer_t  *Timer
+  )
+{
+  UINTN   Idx;
+  CHAR16  *Ucs2;
+  CHAR8   *Utf8;
+
+  (VOID)Timer;
+
+  for (Idx = 0; Idx < mBannerCount; Idx++) {
+    if (mBannerRegistry[Idx].Label == NULL) {
+      continue;
+    }
+
+    Ucs2 = HiiGetString (mBannerRegistry[Idx].HiiHandle, mBannerRegistry[Idx].StringId, NULL);
+    if (Ucs2 == NULL) {
+      continue;
+    }
+
+    Utf8 = Ucs2ToUtf8 (Ucs2);
+    FreePool (Ucs2);
+    if (Utf8 == NULL) {
+      continue;
+    }
+
+    if ((Utf8[0] != '\0') &&
+        (AsciiStrCmp (lv_label_get_text (mBannerRegistry[Idx].Label), Utf8) != 0))
+    {
+      lv_label_set_text (mBannerRegistry[Idx].Label, Utf8);
+    }
+
+    FreePool (Utf8);
+  }
 }
 
 STATIC
@@ -2800,6 +2873,17 @@ LvglRenderForm (
   mNavCount               = 0;
   mEditingDropdown        = NULL;
 
+  //
+  // Drop any banner-refresh timer/registry from the previous form before the
+  // new form's banners are (re)registered in BuildFormWidgets.
+  //
+  if (mBannerTimer != NULL) {
+    lv_timer_delete (mBannerTimer);
+    mBannerTimer = NULL;
+  }
+
+  mBannerCount = 0;
+
   ZeroMem (UserInputData, sizeof (USER_INPUT));
 
   //
@@ -2849,6 +2933,14 @@ LvglRenderForm (
     mSession.Screen = ContentPanel;
     BuildFormWidgets (&mSession);
     mSession.Screen = OrigScreen;
+  }
+
+  //
+  // If the form registered any banner lines, poll them at 1 Hz so live values
+  // (e.g. battery status updated via HiiSetString) stay current on screen.
+  //
+  if (mBannerCount > 0) {
+    mBannerTimer = lv_timer_create (BannerRefreshTimerCb, 1000, NULL);
   }
 
   //
@@ -3312,6 +3404,13 @@ LvglRendererCleanup (
   )
 {
   AptioChromeTeardown ();
+
+  if (mBannerTimer != NULL) {
+    lv_timer_delete (mBannerTimer);
+    mBannerTimer = NULL;
+  }
+
+  mBannerCount = 0;
 
   if (mSession.Group != NULL) {
     lv_group_delete (mSession.Group);
