@@ -27,8 +27,9 @@ STATIC BOOLEAN            mLvglReady = FALSE;
 // so UP/DOWN can step onto disabled rows too (read-only focus).
 //
 #define LVGL_NAV_MAX  256
-STATIC lv_obj_t  *mNavList[LVGL_NAV_MAX];
-STATIC UINTN     mNavCount = 0;
+STATIC lv_obj_t                       *mNavList[LVGL_NAV_MAX];
+STATIC FORM_DISPLAY_ENGINE_STATEMENT  *mNavStatement[LVGL_NAV_MAX];
+STATIC UINTN                          mNavCount = 0;
 
 //
 // Keyboard-edit tracking for ONE_OF dropdowns.
@@ -1486,7 +1487,9 @@ AddToNavGroup (
   }
 
   if (mNavCount < LVGL_NAV_MAX) {
-    mNavList[mNavCount++] = Widget;
+    mNavStatement[mNavCount] = (Ctx != NULL) ? Ctx->Statement : NULL;
+    mNavList[mNavCount]      = Widget;
+    mNavCount++;
   }
 }
 
@@ -2803,6 +2806,22 @@ LvglRenderForm (
   // Load the screen.
   //
   lv_screen_load (mSession.Screen);
+
+  //
+  // Restore the selection the browser asked to highlight
+  //
+  if (FormData->HighLightedStatement != NULL) {
+    UINTN  FocusIdx;
+
+    lv_obj_update_layout (mSession.Screen);
+    for (FocusIdx = 0; FocusIdx < mNavCount; FocusIdx++) {
+      if (mNavStatement[FocusIdx] == FormData->HighLightedStatement) {
+        lv_group_focus_obj (mNavList[FocusIdx]);
+        lv_obj_scroll_to_view (mNavList[FocusIdx], LV_ANIM_OFF);
+        break;
+      }
+    }
+  }
 
   //
   // LVGL event loop — run until user makes a selection or presses ESC.
