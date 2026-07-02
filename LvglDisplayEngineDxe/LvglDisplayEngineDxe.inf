@@ -43,6 +43,9 @@
   HiiLib
   LvglLib
 
+[Guids]
+  gEfiIfrTianoGuid                      ## CONSUMES ## GUID (Identify front-page banner opcodes)
+
 [Protocols]
   gEdkiiFormDisplayEngineProtocolGuid   ## PRODUCES
   gEfiGraphicsOutputProtocolGuid        ## CONSUMES

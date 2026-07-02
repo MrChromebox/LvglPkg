@@ -15,6 +15,7 @@
 #include "LvglAptioChrome.h"
 #include <LvglTheme.h>
 #include <Library/PrintLib.h>
+#include <Guid/MdeModuleHii.h>
 
 STATIC LVGL_FORM_SESSION  mSession;
 STATIC BOOLEAN            mLvglReady = FALSE;
@@ -59,6 +60,7 @@ STATIC UINT32     mNoneAction         = BROWSER_ACTION_NONE;
 STATIC VOID ShowPopup (lv_group_t *Group, CONST CHAR8 *Title, CONST CHAR8 *ConfirmLabel, UINT32 ConfirmAction, BOOLEAN ShowDiscard);
 STATIC VOID CreateSubtitleWidget      (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle);
 STATIC VOID CreateTextWidget          (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle);
+STATIC VOID CreateBannerWidget        (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle);
 STATIC VOID CreateCheckboxWidget      (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle, lv_group_t *Group);
 STATIC VOID CreateNumericWidget       (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle, lv_group_t *Group);
 STATIC VOID CreateOneOfWidget         (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle, lv_group_t *Group);
@@ -1629,6 +1631,80 @@ CreateTextWidget (
   FreePool (Prompt);
 }
 
+/**
+  Render a front-page banner line (device model / BIOS version / CPU / memory /
+  battery). These arrive as Tiano GUIDed EFI_IFR_EXTEND_OP_BANNER opcodes, which
+  the text-mode engine drew via CustomizedDisplayLib's PrintBannerInfo(). The
+  centered line (typically the model, LineNumber 1) is emphasized to mimic the
+  classic banner heading.
+**/
+STATIC
+VOID
+CreateBannerWidget (
+  lv_obj_t                        *Parent,
+  FORM_DISPLAY_ENGINE_STATEMENT   *Statement,
+  EFI_HII_HANDLE                 HiiHandle
+  )
+{
+  EFI_IFR_GUID_BANNER  *Banner;
+  CHAR16               *Ucs2;
+  CHAR8                *Utf8;
+  lv_obj_t             *Label;
+
+  Banner = (EFI_IFR_GUID_BANNER *)Statement->OpCode;
+  if (Banner->Title == 0) {
+    return;
+  }
+
+  Ucs2 = HiiGetString (HiiHandle, Banner->Title, NULL);
+  if (Ucs2 == NULL) {
+    return;
+  }
+
+  Utf8 = Ucs2ToUtf8 (Ucs2);
+  FreePool (Ucs2);
+  if (Utf8 == NULL) {
+    return;
+  }
+
+  //
+  // Skip placeholder/empty banner lines (e.g. an unpopulated battery row).
+  //
+  if (Utf8[0] == '\0') {
+    FreePool (Utf8);
+    return;
+  }
+
+  Label = lv_label_create (Parent);
+  lv_label_set_long_mode (Label, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width (Label, LV_PCT (100));
+  lv_label_set_text (Label, Utf8);
+  lv_obj_set_style_text_font (Label, THEME_FONT_BODY, 0);
+  lv_obj_set_style_text_color (Label, lv_color_hex (THEME_COLOR_TEXT_PRIMARY), 0);
+
+  switch (Banner->Alignment) {
+    case EFI_IFR_BANNER_ALIGN_CENTER:
+      lv_obj_set_style_text_align (Label, LV_TEXT_ALIGN_CENTER, 0);
+      //
+      // The centered line is the device model; give it the title font and
+      // accent color so it reads as the banner heading.
+      //
+      lv_obj_set_style_text_font (Label, THEME_FONT_TITLE, 0);
+      lv_obj_set_style_text_color (Label, lv_color_hex (THEME_COLOR_ACCENT_HOVER), 0);
+      break;
+
+    case EFI_IFR_BANNER_ALIGN_RIGHT:
+      lv_obj_set_style_text_align (Label, LV_TEXT_ALIGN_RIGHT, 0);
+      break;
+
+    default:
+      lv_obj_set_style_text_align (Label, LV_TEXT_ALIGN_LEFT, 0);
+      break;
+  }
+
+  FreePool (Utf8);
+}
+
 STATIC
 VOID
 CreateCheckboxWidget (
@@ -2335,6 +2411,25 @@ BuildFormWidgets (
 
       case EFI_IFR_ACTION_OP:
         CreateActionWidget (Session->Screen, Statement, HiiHandle, Session->Group);
+        break;
+
+      case EFI_IFR_GUID_OP:
+        //
+        // Front-page banner lines (model / BIOS version / CPU / memory /
+        // battery) are Tiano GUIDed EFI_IFR_EXTEND_OP_BANNER opcodes. The
+        // text engine drew these via CustomizedDisplayLib; render them here
+        // so the front-page banner isn't lost. All other GUIDed opcodes
+        // (labels, class/subclass) are display-only and safely ignored.
+        //
+        if (CompareGuid (
+              (EFI_GUID *)((UINT8 *)Statement->OpCode + sizeof (EFI_IFR_OP_HEADER)),
+              &gEfiIfrTianoGuid
+              ) &&
+            (((EFI_IFR_GUID_LABEL *)Statement->OpCode)->ExtendOpCode == EFI_IFR_EXTEND_OP_BANNER))
+        {
+          CreateBannerWidget (Session->Screen, Statement, HiiHandle);
+        }
+
         break;
 
       default:
