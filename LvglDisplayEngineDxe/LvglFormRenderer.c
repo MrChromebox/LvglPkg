@@ -68,6 +68,7 @@ STATIC VOID CreateOrderedListWidget   (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STA
 STATIC VOID CreateStringWidget        (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle, lv_group_t *Group);
 STATIC VOID CreateRefWidget           (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle, lv_group_t *Group);
 STATIC VOID CreateActionWidget        (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle, lv_group_t *Group);
+STATIC VOID CreateDateTimeWidget      (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle, lv_group_t *Group, BOOLEAN IsDate);
 
 //
 // ---- Helper: UCS-2 string to UTF-8 for LVGL ----
@@ -1119,6 +1120,25 @@ Uint64ToAsciiDecimal (
   Buf[o] = '\0';
 }
 
+STATIC
+UINT64
+ClampU64 (
+  IN UINT64  Value,
+  IN UINT64  Low,
+  IN UINT64  High
+  )
+{
+  if (Value < Low) {
+    return Low;
+  }
+
+  if (Value > High) {
+    return High;
+  }
+
+  return Value;
+}
+
 /**
   Numeric textarea commit — fires when the user presses ENTER on a one_line
   textarea (LV_EVENT_READY). Parses the typed text, clamps to the IFR
@@ -1182,6 +1202,71 @@ OnNumericReady (
 
   mSession.UserInput->Action = 0;
   mSession.ExitRequested     = TRUE;
+}
+
+//
+// Per-question context for EFI_IFR_DATE / EFI_IFR_TIME rows. A single context
+// is shared by the three sub-field textareas; committing reads all three.
+//
+typedef struct {
+  FORM_DISPLAY_ENGINE_STATEMENT  *Statement;
+  BOOLEAN                        IsDate;    // TRUE = date (M/D/Y), FALSE = time (H:M:S)
+  lv_obj_t                       *Field0;   // month  / hour
+  lv_obj_t                       *Field1;   // day    / minute
+  lv_obj_t                       *Field2;   // year   / second
+} LVGL_DATETIME_CTX;
+
+/**
+  Date/Time sub-field commit — fires when ENTER is pressed on any of the
+  three one-line textareas (LV_EVENT_READY). Reads all three fields, clamps
+  each to its valid range, and delivers a full EFI_IFR_TYPE_DATE/TIME value.
+
+  The whole CurrentValue is copied first (preserving Type) then the three
+  components are overwritten, mirroring DisplayEngineDxe's InputHandler.c.
+**/
+STATIC
+VOID
+OnDateTimeReady (
+  lv_event_t  *Event
+  )
+{
+  LVGL_DATETIME_CTX  *Ctx;
+  UINT64             V0;
+  UINT64             V1;
+  UINT64             V2;
+
+  Ctx = (LVGL_DATETIME_CTX *)lv_event_get_user_data (Event);
+  if ((Ctx == NULL) || (mSession.UserInput == NULL)) {
+    return;
+  }
+
+  if (!IsStatementInCurrentForm (Ctx->Statement)) {
+    return;
+  }
+
+  V0 = AsciiDecimalToUint64 (lv_textarea_get_text (Ctx->Field0));
+  V1 = AsciiDecimalToUint64 (lv_textarea_get_text (Ctx->Field1));
+  V2 = AsciiDecimalToUint64 (lv_textarea_get_text (Ctx->Field2));
+
+  CopyMem (
+    &mSession.UserInput->InputValue,
+    &Ctx->Statement->CurrentValue,
+    sizeof (EFI_HII_VALUE)
+    );
+
+  if (Ctx->IsDate) {
+    mSession.UserInput->InputValue.Value.date.Month = (UINT8)ClampU64 (V0, 1, 12);
+    mSession.UserInput->InputValue.Value.date.Day   = (UINT8)ClampU64 (V1, 1, 31);
+    mSession.UserInput->InputValue.Value.date.Year  = (UINT16)ClampU64 (V2, 1998, 2099);
+  } else {
+    mSession.UserInput->InputValue.Value.time.Hour   = (UINT8)ClampU64 (V0, 0, 23);
+    mSession.UserInput->InputValue.Value.time.Minute = (UINT8)ClampU64 (V1, 0, 59);
+    mSession.UserInput->InputValue.Value.time.Second = (UINT8)ClampU64 (V2, 0, 59);
+  }
+
+  mSession.UserInput->SelectedStatement = Ctx->Statement;
+  mSession.UserInput->Action            = 0;
+  mSession.ExitRequested                = TRUE;
 }
 
 STATIC
@@ -1852,6 +1937,157 @@ CreateNumericWidget (
 }
 
 /**
+  Create one digit-only textarea sub-field for a Date/Time row. ENTER commits
+  the whole question via OnDateTimeReady (shared @a DtCtx). @a HelpCtx drives
+  the help pane on focus/hover.
+**/
+STATIC
+lv_obj_t *
+CreateDateTimeField (
+  IN lv_obj_t                *Row,
+  IN UINT64                  Value,
+  IN UINTN                   Digits,
+  IN lv_group_t              *Group,
+  IN LVGL_DATETIME_CTX       *DtCtx,
+  IN LVGL_STATEMENT_CONTEXT  *HelpCtx
+  )
+{
+  lv_obj_t  *Ta;
+  CHAR8     Buf[16];
+
+  Ta = lv_textarea_create (Row);
+  lv_textarea_set_one_line (Ta, true);
+  lv_textarea_set_accepted_chars (Ta, "0123456789");
+  lv_textarea_set_max_length (Ta, (uint32_t)Digits);
+
+  Uint64ToAsciiDecimal (Value, Buf, sizeof (Buf));
+  lv_textarea_set_text (Ta, Buf);
+
+  //
+  // Roughly size the field to its digit count (glyph ~12 px + padding).
+  //
+  lv_obj_set_width (Ta, (lv_coord_t)(Digits * 12 + 28));
+
+  lv_obj_add_event_cb (Ta, OnDateTimeReady, LV_EVENT_READY, DtCtx);
+
+  //
+  // Reuse the numeric on-screen keyboard (user_data 1 = NUMBER mode).
+  //
+  lv_obj_add_event_cb (Ta, OnTextareaFocused,   LV_EVENT_FOCUSED,   (void *)(UINTN)1);
+  lv_obj_add_event_cb (Ta, OnTextareaFocused,   LV_EVENT_CLICKED,   (void *)(UINTN)1);
+  lv_obj_add_event_cb (Ta, OnTextareaDefocused, LV_EVENT_DEFOCUSED, NULL);
+
+  AddToNavGroup (Group, Ta, HelpCtx);
+  return Ta;
+}
+
+/**
+  Render an EFI_IFR_DATE_OP (M/D/Y) or EFI_IFR_TIME_OP (H:M:S) question as a
+  row of three digit-only textareas separated by "/" or ":". Editing any
+  field and pressing ENTER commits the full date/time value to the browser.
+**/
+STATIC
+VOID
+CreateDateTimeWidget (
+  lv_obj_t                        *Parent,
+  FORM_DISPLAY_ENGINE_STATEMENT   *Statement,
+  EFI_HII_HANDLE                  HiiHandle,
+  lv_group_t                      *Group,
+  BOOLEAN                         IsDate
+  )
+{
+  CHAR8                   *Text;
+  lv_obj_t                *Row;
+  lv_obj_t                *Label;
+  lv_obj_t                *Sep;
+  LVGL_DATETIME_CTX       *DtCtx;
+  LVGL_STATEMENT_CONTEXT  *HelpCtx;
+  UINT64                  C0;
+  UINT64                  C1;
+  UINT64                  C2;
+  CONST CHAR8             *SepText;
+  UINTN                   Field2Digits;
+
+  Text = GetPromptUtf8 (Statement, HiiHandle);
+
+  Row = lv_obj_create (Parent);
+  StyleRow (Row);
+  if (Statement->SettingChangedFlag) {
+    MarkRowChanged (Row);
+  }
+
+  Label = lv_label_create (Row);
+  lv_label_set_text (Label, Text != NULL ? Text : (IsDate ? "Date" : "Time"));
+  lv_obj_set_flex_grow (Label, 1);
+
+  if (IsDate) {
+    C0           = ClampU64 (Statement->CurrentValue.Value.date.Month, 1, 12);
+    C1           = ClampU64 (Statement->CurrentValue.Value.date.Day, 1, 31);
+    C2           = ClampU64 (Statement->CurrentValue.Value.date.Year, 1998, 2099);
+    SepText      = "/";
+    Field2Digits = 4;
+  } else {
+    C0           = ClampU64 (Statement->CurrentValue.Value.time.Hour, 0, 23);
+    C1           = ClampU64 (Statement->CurrentValue.Value.time.Minute, 0, 59);
+    C2           = ClampU64 (Statement->CurrentValue.Value.time.Second, 0, 59);
+    SepText      = ":";
+    Field2Digits = 2;
+  }
+
+  DtCtx   = AllocateZeroPool (sizeof (LVGL_DATETIME_CTX));
+  HelpCtx = AllocateZeroPool (sizeof (LVGL_STATEMENT_CONTEXT));
+  if ((DtCtx == NULL) || (HelpCtx == NULL)) {
+    if (DtCtx != NULL) {
+      FreePool (DtCtx);
+    }
+
+    if (HelpCtx != NULL) {
+      FreePool (HelpCtx);
+    }
+
+    if (Text != NULL) {
+      FreePool (Text);
+    }
+
+    return;
+  }
+
+  DtCtx->Statement   = Statement;
+  DtCtx->IsDate      = IsDate;
+  HelpCtx->Statement = Statement;
+
+  DtCtx->Field0 = CreateDateTimeField (Row, C0, 2, Group, DtCtx, HelpCtx);
+
+  Sep = lv_label_create (Row);
+  lv_label_set_text (Sep, SepText);
+
+  DtCtx->Field1 = CreateDateTimeField (Row, C1, 2, Group, DtCtx, HelpCtx);
+
+  Sep = lv_label_create (Row);
+  lv_label_set_text (Sep, SepText);
+
+  DtCtx->Field2 = CreateDateTimeField (Row, C2, Field2Digits, Group, DtCtx, HelpCtx);
+
+  if (Statement->Attribute & HII_DISPLAY_GRAYOUT) {
+    lv_obj_add_state (Row, LV_STATE_DISABLED);
+    lv_obj_add_state (DtCtx->Field0, LV_STATE_DISABLED);
+    lv_obj_add_state (DtCtx->Field1, LV_STATE_DISABLED);
+    lv_obj_add_state (DtCtx->Field2, LV_STATE_DISABLED);
+  }
+
+  BindRowFocus (DtCtx->Field0, Row);
+  BindRowFocus (DtCtx->Field1, Row);
+  BindRowFocus (DtCtx->Field2, Row);
+  BindRowHover (DtCtx->Field0, Row, HelpCtx);
+  BindRowHover (DtCtx->Field1, Row, HelpCtx);
+  BindRowHover (DtCtx->Field2, Row, HelpCtx);
+
+  if (Text != NULL) {
+    FreePool (Text);
+  }
+}
+
+/**
   LV_EVENT_DEFOCUSED handler for ONE_OF dropdowns.
   If the user moves away (mouse click, Tab, etc.) while a dropdown is in
   keyboard-editing mode, commit the current selection once and clear the
@@ -2412,6 +2648,14 @@ BuildFormWidgets (
 
       case EFI_IFR_ACTION_OP:
         CreateActionWidget (Session->Screen, Statement, HiiHandle, Session->Group);
+        break;
+
+      case EFI_IFR_DATE_OP:
+        CreateDateTimeWidget (Session->Screen, Statement, HiiHandle, Session->Group, TRUE);
+        break;
+
+      case EFI_IFR_TIME_OP:
+        CreateDateTimeWidget (Session->Screen, Statement, HiiHandle, Session->Group, FALSE);
         break;
 
       case EFI_IFR_GUID_OP:
