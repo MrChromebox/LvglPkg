@@ -87,6 +87,14 @@ STATIC INT32                          mWheelDelta    = 0;
 STATIC BOOLEAN                        mLeftButton    = FALSE;
 
 //
+// The mouse cursor image. Hidden until an absolute pointer (mouse) is actually
+// present, so a machine with no mouse doesn't show a dead cursor stuck in the
+// middle of the screen.
+//
+STATIC lv_obj_t                       *mCursorObj    = NULL;
+STATIC BOOLEAN                        mCursorVisible = FALSE;
+
+//
 // PR#17 lazy-binding state.
 //
 STATIC EFI_EVENT    mPointerNotifyEvent        = NULL;
@@ -162,6 +170,15 @@ mouse_read (
       mAbsPointer->Mode->AbsoluteMaxX == 0 ||
       mAbsPointer->Mode->AbsoluteMaxY == 0)
   {
+    //
+    // No pointer device: keep the cursor hidden so it doesn't sit dead in the
+    // middle of the screen.
+    //
+    if (mCursorVisible && (mCursorObj != NULL)) {
+      lv_obj_add_flag (mCursorObj, LV_OBJ_FLAG_HIDDEN);
+      mCursorVisible = FALSE;
+    }
+
     data->point.x = (lv_coord_t)mLastCursorX;
     data->point.y = (lv_coord_t)mLastCursorY;
     data->state   = LV_INDEV_STATE_RELEASED;
@@ -177,6 +194,9 @@ mouse_read (
 
   Status = mAbsPointer->GetState (mAbsPointer, &AbsState);
   if (!EFI_ERROR (Status)) {
+    INTN  PrevX = mLastCursorX;
+    INTN  PrevY = mLastCursorY;
+
     //
     // Rescale absolute X/Y to display pixels, clamp to screen edge.
     //
@@ -189,6 +209,20 @@ mouse_read (
     if (mLastCursorY < 0)           mLastCursorY = 0;
 
     mLeftButton = (AbsState.ActiveButtons & BIT0) != 0;
+
+    //
+    // Reveal the cursor only on genuine pointer activity (movement or a
+    // button). A non-zero range alone is not enough: the ConSplitter exposes a
+    // virtual absolute pointer with a valid range even when no physical mouse
+    // is attached. Gating on real motion/click ensures a mouseless machine
+    // never shows a dead cursor stuck in the middle of the screen.
+    //
+    if (!mCursorVisible && (mCursorObj != NULL) &&
+        ((mLastCursorX != PrevX) || (mLastCursorY != PrevY) || mLeftButton))
+    {
+      lv_obj_clear_flag (mCursorObj, LV_OBJ_FLAG_HIDDEN);
+      mCursorVisible = TRUE;
+    }
 
     //
     // Accumulate wheel delta from Z axis.
@@ -385,6 +419,13 @@ void lv_port_indev_init (lv_display_t *disp)
     lv_obj_t *cursor_obj = lv_image_create (lv_screen_active ());
     lv_image_set_src (cursor_obj, &mouse_cursor_icon);
     lv_indev_set_cursor (indev_mouse, cursor_obj);
+
+    //
+    // Start hidden; mouse_read() reveals it once a real pointer is detected.
+    //
+    mCursorObj     = cursor_obj;
+    mCursorVisible = FALSE;
+    lv_obj_add_flag (mCursorObj, LV_OBJ_FLAG_HIDDEN);
 
     //
     // Centre the cursor and zero the wheel accumulator.
