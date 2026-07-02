@@ -56,6 +56,21 @@ STATIC lv_obj_t   *mPopupPrevFocus    = NULL;
 STATIC UINT32     mNoneAction         = BROWSER_ACTION_NONE;
 
 //
+// EFI_HII_POPUP_PROTOCOL popup state
+// Allows a driver callback to raise a modal Yes/No while a form is displayed.
+//
+#define LVGL_HII_POPUP_PENDING  (-1)
+STATIC INT32     mHiiPopupSel     = LVGL_HII_POPUP_PENDING;
+STATIC lv_obj_t  *mHiiPopupOverlay = NULL;
+STATIC lv_obj_t  *mHiiPopupFirst   = NULL;
+STATIC lv_obj_t  *mHiiPopupLast    = NULL;
+STATIC INT32       mHiiPopupYesSel = LVGL_HII_POPUP_PENDING;
+STATIC INT32       mHiiPopupNoSel  = LVGL_HII_POPUP_PENDING;
+STATIC INT32       mHiiPopupEscSel = LVGL_HII_POPUP_PENDING;
+STATIC lv_group_t  *mHiiPopupGroup = NULL;
+
+
+//
 // Forward declarations for widget builders.
 //
 STATIC VOID ShowPopup (lv_group_t *Group, CONST CHAR8 *Title, CONST CHAR8 *ConfirmLabel, UINT32 ConfirmAction, BOOLEAN ShowDiscard);
@@ -2926,6 +2941,319 @@ LvglRunConfirmPopup (
     mPopupResult   = LVGL_POPUP_PENDING;
     return Result;
   }
+}
+
+//
+// ---- EFI_HII_POPUP_PROTOCOL backing popup ----
+//
+
+/**
+  Dismiss the HII popup, recording the chosen selection.
+**/
+STATIC
+VOID
+CloseHiiPopup (
+  IN INT32  Selection
+  )
+{
+  mHiiPopupSel = Selection;
+  if (mHiiPopupOverlay != NULL) {
+    lv_obj_delete (mHiiPopupOverlay);
+    mHiiPopupOverlay = NULL;
+    mHiiPopupFirst   = NULL;
+    mHiiPopupLast    = NULL;
+  }
+}
+
+/**
+  HII popup button click — user_data encodes (selection + 1).
+**/
+STATIC
+VOID
+OnHiiPopupBtn (
+  lv_event_t  *Event
+  )
+{
+  CloseHiiPopup ((INT32)(UINTN)lv_event_get_user_data (Event) - 1);
+}
+
+/**
+  HII popup keyboard handling: Y/N shortcuts, ESC (cancel/no), and
+  LEFT/RIGHT/UP/DOWN to move between buttons without escaping the popup.
+**/
+STATIC
+VOID
+OnHiiPopupKey (
+  lv_event_t  *Event
+  )
+{
+  lv_key_t  Key;
+  lv_obj_t  *Focused;
+
+  Key = lv_indev_get_key (lv_indev_active ());
+
+  if (((Key == 'Y') || (Key == 'y')) && (mHiiPopupYesSel != LVGL_HII_POPUP_PENDING)) {
+    CloseHiiPopup (mHiiPopupYesSel);
+    lv_event_stop_processing (Event);
+    return;
+  }
+
+  if (((Key == 'N') || (Key == 'n')) && (mHiiPopupNoSel != LVGL_HII_POPUP_PENDING)) {
+    CloseHiiPopup (mHiiPopupNoSel);
+    lv_event_stop_processing (Event);
+    return;
+  }
+
+  if (Key == LV_KEY_ESC) {
+    CloseHiiPopup (mHiiPopupEscSel);
+    lv_event_stop_processing (Event);
+    return;
+  }
+
+  if (mHiiPopupGroup == NULL) {
+    return;
+  }
+
+  if ((Key == LV_KEY_LEFT) || (Key == LV_KEY_UP)) {
+    Focused = lv_group_get_focused (mHiiPopupGroup);
+    if (Focused != mHiiPopupFirst) {
+      lv_group_focus_prev (mHiiPopupGroup);
+    }
+
+    lv_event_stop_processing (Event);
+  } else if ((Key == LV_KEY_RIGHT) || (Key == LV_KEY_DOWN)) {
+    Focused = lv_group_get_focused (mHiiPopupGroup);
+    if (Focused != mHiiPopupLast) {
+      lv_group_focus_next (mHiiPopupGroup);
+    }
+
+    lv_event_stop_processing (Event);
+  }
+}
+
+/**
+  Add one button to the HII popup button row.
+**/
+STATIC
+lv_obj_t *
+AddHiiPopupButton (
+  IN lv_obj_t     *Row,
+  IN lv_group_t   *Group,
+  IN CONST CHAR8  *Label,
+  IN INT32        Selection
+  )
+{
+  lv_obj_t  *Btn;
+  lv_obj_t  *Lbl;
+
+  Btn = lv_btn_create (Row);
+  Lbl = lv_label_create (Btn);
+  lv_label_set_text (Lbl, Label);
+  lv_obj_add_event_cb (Btn, OnHiiPopupBtn, LV_EVENT_CLICKED, (void *)(UINTN)(Selection + 1));
+  lv_obj_add_event_cb (Btn, OnHiiPopupKey, LV_EVENT_KEY, NULL);
+  lv_group_add_obj (Group, Btn);
+  return Btn;
+}
+
+/**
+  Build the modal HII popup UI on the top layer.
+**/
+STATIC
+VOID
+ShowHiiPopup (
+  IN lv_group_t           *Group,
+  IN CONST CHAR8          *Title,
+  IN CONST CHAR8          *Message,
+  IN EFI_HII_POPUP_TYPE   PopupType
+  )
+{
+  lv_obj_t  *Overlay;
+  lv_obj_t  *Card;
+  lv_obj_t  *TitleLbl;
+  lv_obj_t  *Sep;
+  lv_obj_t  *MsgLbl;
+  lv_obj_t  *BtnRow;
+
+  mHiiPopupSel    = LVGL_HII_POPUP_PENDING;
+  mHiiPopupYesSel = LVGL_HII_POPUP_PENDING;
+  mHiiPopupNoSel  = LVGL_HII_POPUP_PENDING;
+  mHiiPopupEscSel = LVGL_HII_POPUP_PENDING;
+  mHiiPopupGroup  = Group;
+
+  Overlay = lv_obj_create (lv_layer_top ());
+  lv_obj_set_size (Overlay, LV_PCT (100), LV_PCT (100));
+  lv_obj_set_style_bg_color (Overlay, lv_color_black (), 0);
+  lv_obj_set_style_bg_opa (Overlay, THEME_OVERLAY_OPA, 0);
+  lv_obj_set_style_border_width (Overlay, 0, 0);
+  lv_obj_set_style_pad_all (Overlay, 0, 0);
+  lv_obj_set_flex_flow (Overlay, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align (Overlay, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  mHiiPopupOverlay = Overlay;
+
+  Card = lv_obj_create (Overlay);
+  lv_obj_set_width (Card, LV_PCT (THEME_DIALOG_WIDTH_PCT));
+  lv_obj_set_height (Card, LV_SIZE_CONTENT);
+  lv_obj_set_flex_flow (Card, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_style_pad_all (Card, THEME_PAD_DIALOG, 0);
+  lv_obj_set_style_pad_row (Card, THEME_PAD_DIALOG_ROW_GAP, 0);
+  lv_obj_set_style_bg_color (Card, lv_color_hex (THEME_COLOR_BG_DIALOG), 0);
+  lv_obj_set_style_radius (Card, THEME_RADIUS, 0);
+  lv_obj_set_style_border_width (Card, 0, 0);
+
+  TitleLbl = lv_label_create (Card);
+  lv_label_set_text (TitleLbl, Title);
+  lv_obj_set_style_text_font (TitleLbl, THEME_FONT_POPUP, 0);
+  lv_obj_set_style_text_color (TitleLbl, lv_color_hex (THEME_COLOR_TEXT_TITLE), 0);
+
+  Sep = lv_obj_create (Card);
+  lv_obj_set_size (Sep, LV_PCT (100), THEME_BORDER_PANE);
+  lv_obj_set_style_bg_color (Sep, lv_color_hex (THEME_COLOR_BG_SEPARATOR), 0);
+  lv_obj_set_style_border_width (Sep, 0, 0);
+  lv_obj_set_style_pad_all (Sep, 0, 0);
+
+  MsgLbl = lv_label_create (Card);
+  lv_label_set_long_mode (MsgLbl, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width (MsgLbl, LV_PCT (100));
+  lv_label_set_text (MsgLbl, Message);
+  lv_obj_set_style_text_color (MsgLbl, lv_color_hex (THEME_COLOR_TEXT_POPUP), 0);
+
+  BtnRow = lv_obj_create (Card);
+  lv_obj_set_size (BtnRow, LV_PCT (100), LV_SIZE_CONTENT);
+  lv_obj_set_flex_flow (BtnRow, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align (BtnRow, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_all (BtnRow, 0, 0);
+  lv_obj_set_style_border_width (BtnRow, 0, 0);
+  lv_obj_set_style_bg_opa (BtnRow, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_pad_column (BtnRow, THEME_PAD_DIALOG_COL_GAP, 0);
+
+  switch (PopupType) {
+    case EfiHiiPopupTypeOk:
+      mHiiPopupFirst  = AddHiiPopupButton (BtnRow, Group, "OK", EfiHiiPopupSelectionOk);
+      mHiiPopupLast   = mHiiPopupFirst;
+      mHiiPopupEscSel = EfiHiiPopupSelectionOk;
+      break;
+
+    case EfiHiiPopupTypeOkCancel:
+      mHiiPopupFirst  = AddHiiPopupButton (BtnRow, Group, "OK", EfiHiiPopupSelectionOk);
+      mHiiPopupLast   = AddHiiPopupButton (BtnRow, Group, "Cancel", EfiHiiPopupSelectionCancel);
+      mHiiPopupEscSel = EfiHiiPopupSelectionCancel;
+      break;
+
+    case EfiHiiPopupTypeYesNoCancel:
+      mHiiPopupFirst  = AddHiiPopupButton (BtnRow, Group, "Yes (Y)", EfiHiiPopupSelectionYes);
+      (VOID)AddHiiPopupButton (BtnRow, Group, "No (N)", EfiHiiPopupSelectionNo);
+      mHiiPopupLast   = AddHiiPopupButton (BtnRow, Group, "Cancel", EfiHiiPopupSelectionCancel);
+      mHiiPopupYesSel = EfiHiiPopupSelectionYes;
+      mHiiPopupNoSel  = EfiHiiPopupSelectionNo;
+      mHiiPopupEscSel = EfiHiiPopupSelectionCancel;
+      break;
+
+    case EfiHiiPopupTypeYesNo:
+    default:
+      mHiiPopupFirst  = AddHiiPopupButton (BtnRow, Group, "Yes (Y)", EfiHiiPopupSelectionYes);
+      mHiiPopupLast   = AddHiiPopupButton (BtnRow, Group, "No (N)", EfiHiiPopupSelectionNo);
+      mHiiPopupYesSel = EfiHiiPopupSelectionYes;
+      mHiiPopupNoSel  = EfiHiiPopupSelectionNo;
+      mHiiPopupEscSel = EfiHiiPopupSelectionNo;
+      break;
+  }
+
+  if (mHiiPopupFirst != NULL) {
+    lv_group_focus_obj (mHiiPopupFirst);
+  }
+}
+
+EFI_STATUS
+EFIAPI
+LvglHiiCreatePopup (
+  IN  EFI_HII_POPUP_STYLE      PopupStyle,
+  IN  EFI_HII_POPUP_TYPE       PopupType,
+  IN  EFI_HII_HANDLE           HiiHandle,
+  IN  EFI_STRING_ID            Message,
+  OUT EFI_HII_POPUP_SELECTION  *UserSelection OPTIONAL
+  )
+{
+  lv_group_t      *PopupGroup;
+  lv_indev_t      *Indev;
+  CHAR16          *Ucs2;
+  CHAR8           *Utf8;
+  CONST CHAR8     *Title;
+  extern BOOLEAN  mTickSupport;
+
+  if (!mLvglReady) {
+    return EFI_DEVICE_ERROR;
+  }
+
+  Ucs2 = HiiGetString (HiiHandle, Message, NULL);
+  if (Ucs2 == NULL) {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  Utf8 = Ucs2ToUtf8 (Ucs2);
+  FreePool (Ucs2);
+  if (Utf8 == NULL) {
+    return EFI_OUT_OF_RESOURCES;
+  }
+
+  switch (PopupStyle) {
+    case EfiHiiPopupStyleError:
+      Title = "Error";
+      break;
+    case EfiHiiPopupStyleWarning:
+      Title = "Warning";
+      break;
+    default:
+      Title = "Confirm";
+      break;
+  }
+
+  //
+  // Isolate the keypad indev on a dedicated group so keys drive the popup
+  // buttons, not the (still-loaded) form behind it.
+  //
+  PopupGroup = lv_group_create ();
+  Indev      = NULL;
+  while ((Indev = lv_indev_get_next (Indev)) != NULL) {
+    if (lv_indev_get_type (Indev) == LV_INDEV_TYPE_KEYPAD) {
+      lv_indev_set_group (Indev, PopupGroup);
+    }
+  }
+
+  ShowHiiPopup (PopupGroup, Title, Utf8, PopupType);
+
+  //
+  // Drain pending keystrokes so the popup isn't dismissed by a stale key.
+  //
+  lv_uefi_keypad_drain ();
+
+  while (mHiiPopupSel == LVGL_HII_POPUP_PENDING) {
+    lv_timer_handler ();
+    gBS->Stall (10 * 1000);
+    if (!mTickSupport) {
+      lv_tick_inc (10);
+    }
+  }
+
+  //
+  // Restore the keypad indev to the form group and drain the confirming key.
+  //
+  Indev = NULL;
+  while ((Indev = lv_indev_get_next (Indev)) != NULL) {
+    if (lv_indev_get_type (Indev) == LV_INDEV_TYPE_KEYPAD) {
+      lv_indev_set_group (Indev, mSession.Group);
+    }
+  }
+
+  lv_group_delete (PopupGroup);
+  mHiiPopupGroup = NULL;
+  lv_uefi_keypad_drain ();
+
+  if (UserSelection != NULL) {
+    *UserSelection = (EFI_HII_POPUP_SELECTION)mHiiPopupSel;
+  }
+
+  FreePool (Utf8);
+  return EFI_SUCCESS;
 }
 
 VOID

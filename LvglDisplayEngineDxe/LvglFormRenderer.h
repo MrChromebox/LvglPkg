@@ -19,6 +19,7 @@
 #include <Library/UefiBootServicesTableLib.h>
 #include <Protocol/DisplayProtocol.h>
 #include <Protocol/FormBrowserEx.h>
+#include <Protocol/HiiPopup.h>
 #include <Uefi/UefiInternalFormRepresentation.h>
 
 //
@@ -85,6 +86,31 @@ UINTN
 EFIAPI
 LvglRunConfirmPopup (
   VOID
+  );
+
+/**
+  Show a modal popup (backing EFI_HII_POPUP_PROTOCOL.CreatePopup) and block
+  until the user makes a selection. Used by driver callbacks such as
+  SecureBootConfigDxe's "Reset Secure Boot Keys" Yes/No confirmation.
+
+  @param[in]  PopupStyle     Info / Warning / Error styling.
+  @param[in]  PopupType      Ok, OkCancel, YesNo or YesNoCancel button set.
+  @param[in]  HiiHandle      HII handle owning the message string.
+  @param[in]  Message        String token for the message body.
+  @param[out] UserSelection  The button the user chose (optional).
+
+  @retval EFI_SUCCESS            Popup shown and a selection captured.
+  @retval EFI_INVALID_PARAMETER  HiiHandle/Message did not resolve to a string.
+  @retval EFI_DEVICE_ERROR       LVGL is not ready to display.
+**/
+EFI_STATUS
+EFIAPI
+LvglHiiCreatePopup (
+  IN  EFI_HII_POPUP_STYLE      PopupStyle,
+  IN  EFI_HII_POPUP_TYPE       PopupType,
+  IN  EFI_HII_HANDLE           HiiHandle,
+  IN  EFI_STRING_ID            Message,
+  OUT EFI_HII_POPUP_SELECTION  *UserSelection OPTIONAL
   );
 
 /**
