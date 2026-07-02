@@ -103,7 +103,6 @@
 //
 // Chrome -- help pane (right column).
 //
-#define THEME_HELPPANE_WIDTH         240
 #define THEME_PAD_HELPPANE_X         14
 #define THEME_PAD_HELPPANE_Y         12
 #define THEME_PAD_HELPPANE_ROW_GAP   8
@@ -148,10 +147,11 @@
 #define THEME_DIALOG_WIDTH_PCT       50
 
 //
-// Static strings shown in the chrome (no SMBIOS lookup yet).
+// Aptio-style chrome strings and layout overrides (platform DSC / PCD):
+//   PcdLvglAptioHeaderTitle      -- header bar title (left)
+//   PcdLvglAptioHeaderVendor     -- header bar vendor string (center)
+//   PcdLvglHelpPaneWidthPct      -- help pane width (% of content row)
 //
-#define APTIO_HEADER_TITLE        "EDK II Boot Manager"
-#define APTIO_HEADER_VENDOR       "UEFI v2.90  |  EDK II"
 #define APTIO_FOOTER_NAV_HINTS    LV_SYMBOL_UP LV_SYMBOL_DOWN " Select   Enter Confirm   Esc Exit   F9 Defaults   F10 Save"
 #define APTIO_FOOTER_SYSINFO      "QEMU x86_64  |  OVMF"
 

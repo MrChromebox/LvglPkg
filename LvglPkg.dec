@@ -18,3 +18,17 @@
 [Guids]
   ## LVGL UI configuration formset / variable GUID
   gLvglUiConfigFormSetGuid = { 0xddb969f2, 0xe99b, 0x4dd5, { 0x8e, 0x36, 0xb8, 0x0b, 0x52, 0x6d, 0x3b, 0x73 } }
+
+  ## Token space for LvglPkg platform overrides (chrome strings, layout).
+  gLvglPkgTokenSpaceGuid = { 0xd27adb1f, 0x1e75, 0x4e16, { 0xbf, 0x45, 0xf0, 0xf4, 0x0f, 0xfa, 0xef, 0xe8 } }
+
+[PcdsFixedAtBuild, PcdsPatchableInModule]
+  ## Help pane width as a percentage of the content row (Middle band).
+  #  ~19 matches the default 240 px fixed width on a 1280 px panel.
+  gLvglPkgTokenSpaceGuid.PcdLvglHelpPaneWidthPct|19|UINT8|0x00000001
+
+  ## Header bar title (left).
+  gLvglPkgTokenSpaceGuid.PcdLvglAptioHeaderTitle|"EDK II Boot Manager"|VOID*|0x00000002
+
+  ## Header bar vendor/version string (center). Empty string is allowed.
+  gLvglPkgTokenSpaceGuid.PcdLvglAptioHeaderVendor|"UEFI v2.90  |  EDK II"|VOID*|0x00000003

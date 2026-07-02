@@ -41,6 +41,7 @@
   BaseLib
   MemoryAllocationLib
   HiiLib
+  PcdLib
   LvglLib
 
 [Guids]
@@ -54,3 +55,8 @@
 
 [Depex]
   gEfiHiiDatabaseProtocolGuid AND gEfiHiiConfigRoutingProtocolGuid AND gEfiGraphicsOutputProtocolGuid
+
+[Pcd]
+  gLvglPkgTokenSpaceGuid.PcdLvglHelpPaneWidthPct
+  gLvglPkgTokenSpaceGuid.PcdLvglAptioHeaderTitle
+  gLvglPkgTokenSpaceGuid.PcdLvglAptioHeaderVendor
