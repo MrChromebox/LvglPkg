@@ -69,6 +69,12 @@ STATIC INT32       mHiiPopupNoSel  = LVGL_HII_POPUP_PENDING;
 STATIC INT32       mHiiPopupEscSel = LVGL_HII_POPUP_PENDING;
 STATIC lv_group_t  *mHiiPopupGroup = NULL;
 
+//
+// UiApp front-page formset GUID
+//
+STATIC CONST EFI_GUID  mFrontPageFormSetGuid = {
+  0x9e0c30bc, 0x3f06, 0x4ba6, { 0x82, 0x88, 0x09, 0x17, 0x9b, 0x85, 0x5d, 0xbe }
+};
 
 //
 // Forward declarations for widget builders.
@@ -308,6 +314,20 @@ IsStatementInCurrentForm (
   }
 
   return FALSE;
+}
+
+/**
+  Return TRUE when the form currently displayed is the UiApp front page.
+  ESC is a no-op there (see mFrontPageFormSetGuid).
+**/
+STATIC
+BOOLEAN
+IsFrontPageForm (
+  VOID
+  )
+{
+  return (mSession.FormData != NULL) &&
+         CompareGuid (&mSession.FormData->FormSetGuid, &mFrontPageFormSetGuid);
 }
 
 /**
@@ -1053,9 +1073,16 @@ OnIndevFallbackKey (
   }
 
   if (Key == LV_KEY_ESC) {
-    mSession.UserInput->Action            = BROWSER_ACTION_FORM_EXIT;
-    mSession.UserInput->SelectedStatement = NULL;
-    mSession.ExitRequested                = TRUE;
+    //
+    // Front page: no parent form to exit to — swallow ESC so the user can't
+    // accidentally drop out of setup.
+    //
+    if (!IsFrontPageForm ()) {
+      mSession.UserInput->Action            = BROWSER_ACTION_FORM_EXIT;
+      mSession.UserInput->SelectedStatement = NULL;
+      mSession.ExitRequested                = TRUE;
+    }
+
     return;
   }
 
@@ -1337,7 +1364,7 @@ OnNavKey (
       }
 
       lv_group_set_editing (mSession.Group, false);
-    } else {
+    } else if (!IsFrontPageForm ()) {
       mSession.UserInput->Action            = BROWSER_ACTION_FORM_EXIT;
       mSession.UserInput->SelectedStatement = NULL;
       mSession.ExitRequested                = TRUE;
