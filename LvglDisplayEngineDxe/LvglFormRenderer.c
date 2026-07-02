@@ -2082,9 +2082,8 @@ CreateOrderedListWidget (
   lv_obj_set_style_pad_all (Panel, THEME_PAD_ROW, 0);
   lv_obj_set_style_border_width (Panel, 0, 0);
   lv_obj_set_style_bg_opa (Panel, LV_OPA_TRANSP, 0);
-  if (Grayout) {
-    lv_obj_set_style_text_color (Panel, lv_color_hex (THEME_COLOR_ROW_TEXT_DISABLED), 0);
-  }
+  lv_obj_set_style_text_color (Panel, lv_color_hex (
+      Grayout ? THEME_COLOR_ROW_TEXT_DISABLED : THEME_COLOR_TEXT_PRIMARY), 0);
 
   Header = lv_label_create (Panel);
   lv_label_set_text (Header, PromptText != NULL ? PromptText : "Ordered List");
@@ -2145,6 +2144,8 @@ CreateOrderedListWidget (
     Label = lv_label_create (Row);
     lv_label_set_text (Label, OptStr8 != NULL ? OptStr8 : "?");
     lv_obj_set_flex_grow (Label, 1);
+    lv_obj_set_style_text_color (Label, lv_color_hex (
+        Grayout ? THEME_COLOR_ROW_TEXT_DISABLED : THEME_COLOR_TEXT_PRIMARY), 0);
 
     if (OptStr8 != NULL) {
       FreePool (OptStr8);
