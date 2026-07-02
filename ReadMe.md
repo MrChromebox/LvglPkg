@@ -225,6 +225,7 @@ Declared in `LvglPkg.dec`:
 | `PcdLvglHelpPaneWidthPct` | Help pane width (% of content row) |
 | `PcdLvglAptioHeaderTitle` | Header bar title (left) |
 | `PcdLvglAptioHeaderVendor` | Header bar vendor string (center) |
+| `PcdLvglAptioSubtitleShowsDeviceModel` | Show front-page device model in subtitle bar (`TRUE`) or content area (`FALSE`, default) |
 | `PcdLvglCenteredFrameEnabled` | Enable centered frame by default |
 | `PcdLvglCenteredFrameHeightPct` | Frame height (% of display height) |
 | `PcdLvglCenteredFrameAspectNum` / `Den` | Frame aspect ratio (e.g. 16:9) |
@@ -234,6 +235,7 @@ Example:
 ```ini
 [PcdsFixedAtBuild]
   gLvglPkgTokenSpaceGuid.PcdLvglAptioHeaderTitle|"My Firmware Setup"
+  gLvglPkgTokenSpaceGuid.PcdLvglAptioSubtitleShowsDeviceModel|TRUE
   gLvglPkgTokenSpaceGuid.PcdLvglCenteredFrameEnabled|TRUE
 ```
 

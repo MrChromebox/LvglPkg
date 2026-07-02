@@ -14,6 +14,7 @@
 #include "LvglFormRenderer.h"
 #include "LvglAptioChrome.h"
 #include <LvglTheme.h>
+#include <Library/PcdLib.h>
 #include <Library/PrintLib.h>
 #include <Guid/MdeModuleHii.h>
 
@@ -2361,9 +2362,10 @@ CreateTextWidget (
 /**
   Render a front-page banner line (device model / BIOS version / CPU / memory /
   battery). These arrive as Tiano GUIDed EFI_IFR_EXTEND_OP_BANNER opcodes, which
-  the text-mode engine drew via CustomizedDisplayLib's PrintBannerInfo(). The
-  centered line (typically the model, LineNumber 1) is emphasized to mimic the
-  classic banner heading.
+  the text-mode engine drew via CustomizedDisplayLib's PrintBannerInfo().
+
+  When PcdLvglAptioSubtitleShowsDeviceModel is TRUE, the centered line (device
+  model) is shown in the subtitle bar instead and is skipped here.
 **/
 STATIC
 VOID
@@ -2380,6 +2382,12 @@ CreateBannerWidget (
 
   Banner = (EFI_IFR_GUID_BANNER *)Statement->OpCode;
   if (Banner->Title == 0) {
+    return;
+  }
+
+  if (PcdGetBool (PcdLvglAptioSubtitleShowsDeviceModel) &&
+      (Banner->Alignment == EFI_IFR_BANNER_ALIGN_CENTER))
+  {
     return;
   }
 

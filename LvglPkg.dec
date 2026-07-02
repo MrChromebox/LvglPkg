@@ -44,3 +44,9 @@
   ## Centered frame width/height aspect ratio (width = height * Num / Den).
   gLvglPkgTokenSpaceGuid.PcdLvglCenteredFrameAspectNum|16|UINT8|0x00000006
   gLvglPkgTokenSpaceGuid.PcdLvglCenteredFrameAspectDen|9|UINT8|0x00000007
+
+  ## When TRUE, promote the centered front-page banner (device model) into the
+  ## Aptio subtitle bar and omit it from the scrollable content area. When FALSE,
+  ## show the form title in the subtitle bar and render the centered banner in
+  ## the content area (original behavior).
+  gLvglPkgTokenSpaceGuid.PcdLvglAptioSubtitleShowsDeviceModel|FALSE|BOOLEAN|0x00000008

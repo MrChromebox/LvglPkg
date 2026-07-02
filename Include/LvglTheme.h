@@ -166,6 +166,7 @@
 //   PcdLvglAptioHeaderTitle      -- header bar title (left)
 //   PcdLvglAptioHeaderVendor     -- header bar vendor string (center)
 //   PcdLvglHelpPaneWidthPct      -- help pane width (% of content row)
+//   PcdLvglAptioSubtitleShowsDeviceModel -- device model in subtitle bar vs content
 //
 #define APTIO_FOOTER_NAV_HINTS    LV_SYMBOL_UP LV_SYMBOL_DOWN " Select   Enter Confirm   Esc Exit   F9 Defaults   F10 Save"
 #define APTIO_FOOTER_SYSINFO      "QEMU x86_64  |  OVMF"

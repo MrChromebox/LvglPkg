@@ -63,3 +63,4 @@
   gLvglPkgTokenSpaceGuid.PcdLvglHelpPaneWidthPct
   gLvglPkgTokenSpaceGuid.PcdLvglAptioHeaderTitle
   gLvglPkgTokenSpaceGuid.PcdLvglAptioHeaderVendor
+  gLvglPkgTokenSpaceGuid.PcdLvglAptioSubtitleShowsDeviceModel
