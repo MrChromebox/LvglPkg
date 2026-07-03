@@ -1855,6 +1855,7 @@ CreateCheckboxWidget (
 {
   CHAR8                   *Text;
   lv_obj_t                *Row;
+  lv_obj_t                *Label;
   lv_obj_t                *Cb;
   LVGL_STATEMENT_CONTEXT  *Ctx;
 
@@ -1866,9 +1867,21 @@ CreateCheckboxWidget (
     MarkRowChanged (Row);
   }
 
+  //
+  // Prompt label on the left, growing to fill the row so the checkbox
+  // control aligns to the right edge, consistent with ONE_OF and numeric
+  // rows.
+  //
+  Label = lv_label_create (Row);
+  lv_label_set_text (Label, Text != NULL ? Text : "Checkbox");
+  lv_obj_set_flex_grow (Label, 1);
+
+  //
+  // The checkbox itself renders the indicator only; its prompt text is
+  // provided by the label above rather than by the checkbox widget.
+  //
   Cb = lv_checkbox_create (Row);
-  lv_checkbox_set_text (Cb, Text != NULL ? Text : "Checkbox");
-  lv_obj_set_flex_grow (Cb, 1);
+  lv_checkbox_set_text (Cb, "");
   lv_obj_set_style_bg_opa (Cb, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_border_width (Cb, 0, LV_PART_MAIN);
 
