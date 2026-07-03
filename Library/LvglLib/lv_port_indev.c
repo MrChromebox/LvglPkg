@@ -500,6 +500,18 @@ void lv_uefi_keypad_drain (void)
   }
 }
 
+//
+// Report whether a usable pointer (mouse) is present. This tracks the same
+// signal used to reveal the cursor: TRUE only once genuine pointer motion or a
+// click has been seen, and FALSE again if the pointer device disappears. Lets
+// the UI hide mouse-only affordances (e.g. the on-screen keyboard) on machines
+// driven purely by a physical keyboard.
+//
+bool lv_uefi_pointer_is_present (void)
+{
+  return mCursorVisible;
+}
+
 void lv_port_indev_close (void)
 {
   if (mPointerNotifyEvent != NULL) {
