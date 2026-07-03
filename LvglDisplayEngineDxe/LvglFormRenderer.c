@@ -384,6 +384,15 @@ OnTextareaFocused (
     return;
   }
 
+  //
+  // The on-screen keyboard is a mouse-only affordance. On machines driven by a
+  // physical keyboard the focused textarea already receives keystrokes through
+  // the keypad indev, so suppress the pop-up keyboard when no mouse is present.
+  //
+  if (!lv_uefi_pointer_is_present ()) {
+    return;
+  }
+
   Ta        = lv_event_get_target_obj (Event);
   IsNumeric = (UINTN)lv_event_get_user_data (Event);
 
