@@ -2,8 +2,47 @@
 #include "LvglLibCommon.h"
 
 #include <Library/LvglLib.h>
+#include <Library/UefiRuntimeServicesTableLib.h>
+#include <Guid/LvglUiConfig.h>
 
 extern UINT8  mExitBtnYes;
+
+//
+// Read the persisted UI scale selection. Returns LVGL_UI_SCALE_DEFAULT (1x) if
+// the variable is absent, malformed, or holds an unknown value.
+//
+// The variable is only consumed at display-creation time, which happens once a
+// GOP is available (BDS). Variable services are up well before that, so the
+// value is always readable when it matters.
+//
+STATIC
+UINT8
+LvglGetUiScale (
+  VOID
+  )
+{
+  EFI_STATUS                    Status;
+  LVGL_UI_CONFIG_VARSTORE_DATA  Config;
+  UINTN                         Size;
+
+  Size   = sizeof (Config);
+  Status = gRT->GetVariable (
+                  LVGL_UI_CONFIG_VAR_NAME,
+                  &gLvglUiConfigFormSetGuid,
+                  NULL,
+                  &Size,
+                  &Config
+                  );
+  if (EFI_ERROR (Status) || (Size != sizeof (Config))) {
+    return LVGL_UI_SCALE_DEFAULT;
+  }
+
+  if ((Config.UiScale != LVGL_UI_SCALE_1_5X) && (Config.UiScale != LVGL_UI_SCALE_2X)) {
+    return LVGL_UI_SCALE_1X;
+  }
+
+  return Config.UiScale;
+}
 
 // mTickSupport stays FALSE permanently (tick_get_cb / UefiLvglTickInit removed).
 // Kept because LvglDisplayEngineDxe/LvglFormRenderer.c references it via extern.
@@ -30,6 +69,7 @@ UefiLvglInit (
 {
   EFI_HANDLE                         GopHandle;
   lv_display_t                       *Display;
+  UINT8                              UiScale;
 
   if (mUefiLvglInitDone) {
     return EFI_SUCCESS;
@@ -53,7 +93,40 @@ UefiLvglInit (
     return EFI_UNSUPPORTED;
   }
 
-  Display = lv_uefi_display_create (GopHandle);
+  //
+  // Software UI scaling: at 1x use LVGL's stock UEFI backend (zero overhead).
+  // At 1.5x/2x render into a smaller logical canvas and upscale on flush so
+  // widgets and fonts appear physically larger on high-resolution panels.
+  //
+  UiScale = LvglGetUiScale ();
+  Display = NULL;
+  if (UiScale != LVGL_UI_SCALE_1X) {
+    EFI_GRAPHICS_OUTPUT_PROTOCOL  *Gop;
+    UINT32                        Num;
+    UINT32                        Den;
+
+    Gop = NULL;
+    gBS->HandleProtocol (GopHandle, &gEfiGraphicsOutputProtocolGuid, (VOID **)&Gop);
+    if (Gop != NULL) {
+      if (UiScale == LVGL_UI_SCALE_2X) {
+        Num = 2;
+        Den = 1;
+      } else {
+        Num = 3;
+        Den = 2;
+      }
+
+      Display = LvglCreateScaledDisplay (Gop, Num, Den);
+    }
+  }
+
+  //
+  // 1x, or fall back to the stock backend if scaled creation failed.
+  //
+  if (Display == NULL) {
+    Display = lv_uefi_display_create (GopHandle);
+  }
+
   if (Display == NULL) {
     lv_deinit ();
     return EFI_UNSUPPORTED;

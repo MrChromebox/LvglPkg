@@ -20,6 +20,7 @@
 
 [Sources]
   LvglLib.c
+  LvglScaledDisplay.c
   LvglUefiPort.h
   LvglUefiPort.c
 
@@ -510,6 +511,7 @@
 [LibraryClasses]
   UefiLib
   UefiBootServicesTableLib
+  UefiRuntimeServicesTableLib
   MemoryAllocationLib
   BaseMemoryLib
   DebugLib
@@ -517,6 +519,7 @@
   BaseLib
 
 [Guids]
+  gLvglUiConfigFormSetGuid              ## CONSUMES
 
 [Protocols]
   gEfiGraphicsOutputProtocolGuid
