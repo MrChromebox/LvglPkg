@@ -1,0 +1,44 @@
+// *++
+//
+// LVGL UI configuration formset.
+//
+// Presents the software UI-scale control. The selection is stored in the
+// non-volatile LvglUiScale variable and consumed by LvglLib when it creates
+// the LVGL display. A reboot is required for a change to take effect because
+// the display is created once per boot, before any form is rendered.
+//
+// Copyright (c) 2026, MrChromebox. All rights reserved.<BR>
+// SPDX-License-Identifier: BSD-2-Clause-Patent
+//
+// --*/
+
+#include <Uefi/UefiMultiPhase.h>
+#include <Guid/HiiPlatformSetupFormset.h>
+#include <Guid/LvglUiConfig.h>
+
+formset
+  guid      = LVGL_UI_CONFIG_FORMSET_GUID,
+  title     = STRING_TOKEN(STR_FORM_SET_TITLE),
+  help      = STRING_TOKEN(STR_FORM_SET_TITLE_HELP),
+  classguid = EFI_HII_PLATFORM_SETUP_FORMSET_GUID,
+
+  efivarstore LVGL_UI_CONFIG_VARSTORE_DATA,
+    attribute = EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS,
+    name      = LvglUiScale,
+    guid      = LVGL_UI_CONFIG_FORMSET_GUID;
+
+  form formid = 1,
+    title = STRING_TOKEN(STR_FORM_SET_TITLE);
+
+    oneof varid = LvglUiScale.UiScale,
+      prompt = STRING_TOKEN(STR_UI_SCALE_PROMPT),
+      help   = STRING_TOKEN(STR_UI_SCALE_HELP),
+      flags  = NUMERIC_SIZE_1 | RESET_REQUIRED,
+      option text = STRING_TOKEN(STR_UI_SCALE_1X),   value = 0, flags = DEFAULT | MANUFACTURING;
+      option text = STRING_TOKEN(STR_UI_SCALE_1_5X), value = 1, flags = 0;
+      option text = STRING_TOKEN(STR_UI_SCALE_2X),   value = 2, flags = 0;
+    endoneof;
+
+  endform;
+
+endformset;

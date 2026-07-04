@@ -133,6 +133,7 @@
 [Components]
 
   LvglPkg/LvglDisplayEngineDxe/LvglDisplayEngineDxe.inf
+  LvglPkg/LvglSetupDxe/LvglSetupDxe.inf
 
 [BuildOptions]
 
