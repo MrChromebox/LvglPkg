@@ -60,6 +60,12 @@ void lv_port_indev_close();
 **/
 void lv_uefi_keypad_drain(void);
 
+/**
+  Report whether a usable pointer (mouse) is currently present. TRUE only after
+  genuine pointer motion or a click has been observed.
+**/
+bool lv_uefi_pointer_is_present(void);
+
 /**********************
  *      MACROS
  **********************/

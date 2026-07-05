@@ -15,6 +15,7 @@
 #include "LvglAptioChrome.h"
 #include <LvglTheme.h>
 #include <Library/PrintLib.h>
+#include <Guid/MdeModuleHii.h>
 
 STATIC LVGL_FORM_SESSION  mSession;
 STATIC BOOLEAN            mLvglReady = FALSE;
@@ -26,8 +27,9 @@ STATIC BOOLEAN            mLvglReady = FALSE;
 // so UP/DOWN can step onto disabled rows too (read-only focus).
 //
 #define LVGL_NAV_MAX  256
-STATIC lv_obj_t  *mNavList[LVGL_NAV_MAX];
-STATIC UINTN     mNavCount = 0;
+STATIC lv_obj_t                       *mNavList[LVGL_NAV_MAX];
+STATIC FORM_DISPLAY_ENGINE_STATEMENT  *mNavStatement[LVGL_NAV_MAX];
+STATIC UINTN                          mNavCount = 0;
 
 //
 // Keyboard-edit tracking for ONE_OF dropdowns.
@@ -54,11 +56,33 @@ STATIC lv_obj_t   *mPopupPrevFocus    = NULL;
 STATIC UINT32     mNoneAction         = BROWSER_ACTION_NONE;
 
 //
+// EFI_HII_POPUP_PROTOCOL popup state
+// Allows a driver callback to raise a modal Yes/No while a form is displayed.
+//
+#define LVGL_HII_POPUP_PENDING  (-1)
+STATIC INT32     mHiiPopupSel     = LVGL_HII_POPUP_PENDING;
+STATIC lv_obj_t  *mHiiPopupOverlay = NULL;
+STATIC lv_obj_t  *mHiiPopupFirst   = NULL;
+STATIC lv_obj_t  *mHiiPopupLast    = NULL;
+STATIC INT32       mHiiPopupYesSel = LVGL_HII_POPUP_PENDING;
+STATIC INT32       mHiiPopupNoSel  = LVGL_HII_POPUP_PENDING;
+STATIC INT32       mHiiPopupEscSel = LVGL_HII_POPUP_PENDING;
+STATIC lv_group_t  *mHiiPopupGroup = NULL;
+
+//
+// UiApp front-page formset GUID
+//
+STATIC CONST EFI_GUID  mFrontPageFormSetGuid = {
+  0x9e0c30bc, 0x3f06, 0x4ba6, { 0x82, 0x88, 0x09, 0x17, 0x9b, 0x85, 0x5d, 0xbe }
+};
+
+//
 // Forward declarations for widget builders.
 //
 STATIC VOID ShowPopup (lv_group_t *Group, CONST CHAR8 *Title, CONST CHAR8 *ConfirmLabel, UINT32 ConfirmAction, BOOLEAN ShowDiscard);
 STATIC VOID CreateSubtitleWidget      (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle);
 STATIC VOID CreateTextWidget          (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle);
+STATIC VOID CreateBannerWidget        (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle);
 STATIC VOID CreateCheckboxWidget      (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle, lv_group_t *Group);
 STATIC VOID CreateNumericWidget       (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle, lv_group_t *Group);
 STATIC VOID CreateOneOfWidget         (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle, lv_group_t *Group);
@@ -66,6 +90,7 @@ STATIC VOID CreateOrderedListWidget   (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STA
 STATIC VOID CreateStringWidget        (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle, lv_group_t *Group);
 STATIC VOID CreateRefWidget           (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle, lv_group_t *Group);
 STATIC VOID CreateActionWidget        (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle, lv_group_t *Group);
+STATIC VOID CreateDateTimeWidget      (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle, lv_group_t *Group, BOOLEAN IsDate);
 
 //
 // ---- Helper: UCS-2 string to UTF-8 for LVGL ----
@@ -292,6 +317,20 @@ IsStatementInCurrentForm (
 }
 
 /**
+  Return TRUE when the form currently displayed is the UiApp front page.
+  ESC is a no-op there (see mFrontPageFormSetGuid).
+**/
+STATIC
+BOOLEAN
+IsFrontPageForm (
+  VOID
+  )
+{
+  return (mSession.FormData != NULL) &&
+         CompareGuid (&mSession.FormData->FormSetGuid, &mFrontPageFormSetGuid);
+}
+
+/**
   Generic click handler — records the statement selection and requests exit.
 **/
 STATIC
@@ -342,6 +381,15 @@ OnTextareaFocused (
   UINTN     IsNumeric;
 
   if (mSession.OnScreenKb == NULL) {
+    return;
+  }
+
+  //
+  // The on-screen keyboard is a mouse-only affordance. On machines driven by a
+  // physical keyboard the focused textarea already receives keystrokes through
+  // the keypad indev, so suppress the pop-up keyboard when no mouse is present.
+  //
+  if (!lv_uefi_pointer_is_present ()) {
     return;
   }
 
@@ -1034,9 +1082,16 @@ OnIndevFallbackKey (
   }
 
   if (Key == LV_KEY_ESC) {
-    mSession.UserInput->Action            = BROWSER_ACTION_FORM_EXIT;
-    mSession.UserInput->SelectedStatement = NULL;
-    mSession.ExitRequested                = TRUE;
+    //
+    // Front page: no parent form to exit to — swallow ESC so the user can't
+    // accidentally drop out of setup.
+    //
+    if (!IsFrontPageForm ()) {
+      mSession.UserInput->Action            = BROWSER_ACTION_FORM_EXIT;
+      mSession.UserInput->SelectedStatement = NULL;
+      mSession.ExitRequested                = TRUE;
+    }
+
     return;
   }
 
@@ -1117,6 +1172,25 @@ Uint64ToAsciiDecimal (
   Buf[o] = '\0';
 }
 
+STATIC
+UINT64
+ClampU64 (
+  IN UINT64  Value,
+  IN UINT64  Low,
+  IN UINT64  High
+  )
+{
+  if (Value < Low) {
+    return Low;
+  }
+
+  if (Value > High) {
+    return High;
+  }
+
+  return Value;
+}
+
 /**
   Numeric textarea commit — fires when the user presses ENTER on a one_line
   textarea (LV_EVENT_READY). Parses the typed text, clamps to the IFR
@@ -1182,6 +1256,71 @@ OnNumericReady (
   mSession.ExitRequested     = TRUE;
 }
 
+//
+// Per-question context for EFI_IFR_DATE / EFI_IFR_TIME rows. A single context
+// is shared by the three sub-field textareas; committing reads all three.
+//
+typedef struct {
+  FORM_DISPLAY_ENGINE_STATEMENT  *Statement;
+  BOOLEAN                        IsDate;    // TRUE = date (M/D/Y), FALSE = time (H:M:S)
+  lv_obj_t                       *Field0;   // month  / hour
+  lv_obj_t                       *Field1;   // day    / minute
+  lv_obj_t                       *Field2;   // year   / second
+} LVGL_DATETIME_CTX;
+
+/**
+  Date/Time sub-field commit — fires when ENTER is pressed on any of the
+  three one-line textareas (LV_EVENT_READY). Reads all three fields, clamps
+  each to its valid range, and delivers a full EFI_IFR_TYPE_DATE/TIME value.
+
+  The whole CurrentValue is copied first (preserving Type) then the three
+  components are overwritten, mirroring DisplayEngineDxe's InputHandler.c.
+**/
+STATIC
+VOID
+OnDateTimeReady (
+  lv_event_t  *Event
+  )
+{
+  LVGL_DATETIME_CTX  *Ctx;
+  UINT64             V0;
+  UINT64             V1;
+  UINT64             V2;
+
+  Ctx = (LVGL_DATETIME_CTX *)lv_event_get_user_data (Event);
+  if ((Ctx == NULL) || (mSession.UserInput == NULL)) {
+    return;
+  }
+
+  if (!IsStatementInCurrentForm (Ctx->Statement)) {
+    return;
+  }
+
+  V0 = AsciiDecimalToUint64 (lv_textarea_get_text (Ctx->Field0));
+  V1 = AsciiDecimalToUint64 (lv_textarea_get_text (Ctx->Field1));
+  V2 = AsciiDecimalToUint64 (lv_textarea_get_text (Ctx->Field2));
+
+  CopyMem (
+    &mSession.UserInput->InputValue,
+    &Ctx->Statement->CurrentValue,
+    sizeof (EFI_HII_VALUE)
+    );
+
+  if (Ctx->IsDate) {
+    mSession.UserInput->InputValue.Value.date.Month = (UINT8)ClampU64 (V0, 1, 12);
+    mSession.UserInput->InputValue.Value.date.Day   = (UINT8)ClampU64 (V1, 1, 31);
+    mSession.UserInput->InputValue.Value.date.Year  = (UINT16)ClampU64 (V2, 1998, 2099);
+  } else {
+    mSession.UserInput->InputValue.Value.time.Hour   = (UINT8)ClampU64 (V0, 0, 23);
+    mSession.UserInput->InputValue.Value.time.Minute = (UINT8)ClampU64 (V1, 0, 59);
+    mSession.UserInput->InputValue.Value.time.Second = (UINT8)ClampU64 (V2, 0, 59);
+  }
+
+  mSession.UserInput->SelectedStatement = Ctx->Statement;
+  mSession.UserInput->Action            = 0;
+  mSession.ExitRequested                = TRUE;
+}
+
 STATIC
 VOID
 OnNavKey (
@@ -1234,7 +1373,7 @@ OnNavKey (
       }
 
       lv_group_set_editing (mSession.Group, false);
-    } else {
+    } else if (!IsFrontPageForm ()) {
       mSession.UserInput->Action            = BROWSER_ACTION_FORM_EXIT;
       mSession.UserInput->SelectedStatement = NULL;
       mSession.ExitRequested                = TRUE;
@@ -1399,7 +1538,9 @@ AddToNavGroup (
   }
 
   if (mNavCount < LVGL_NAV_MAX) {
-    mNavList[mNavCount++] = Widget;
+    mNavStatement[mNavCount] = (Ctx != NULL) ? Ctx->Statement : NULL;
+    mNavList[mNavCount]      = Widget;
+    mNavCount++;
   }
 }
 
@@ -1629,6 +1770,80 @@ CreateTextWidget (
   FreePool (Prompt);
 }
 
+/**
+  Render a front-page banner line (device model / BIOS version / CPU / memory /
+  battery). These arrive as Tiano GUIDed EFI_IFR_EXTEND_OP_BANNER opcodes, which
+  the text-mode engine drew via CustomizedDisplayLib's PrintBannerInfo(). The
+  centered line (typically the model, LineNumber 1) is emphasized to mimic the
+  classic banner heading.
+**/
+STATIC
+VOID
+CreateBannerWidget (
+  lv_obj_t                        *Parent,
+  FORM_DISPLAY_ENGINE_STATEMENT   *Statement,
+  EFI_HII_HANDLE                 HiiHandle
+  )
+{
+  EFI_IFR_GUID_BANNER  *Banner;
+  CHAR16               *Ucs2;
+  CHAR8                *Utf8;
+  lv_obj_t             *Label;
+
+  Banner = (EFI_IFR_GUID_BANNER *)Statement->OpCode;
+  if (Banner->Title == 0) {
+    return;
+  }
+
+  Ucs2 = HiiGetString (HiiHandle, Banner->Title, NULL);
+  if (Ucs2 == NULL) {
+    return;
+  }
+
+  Utf8 = Ucs2ToUtf8 (Ucs2);
+  FreePool (Ucs2);
+  if (Utf8 == NULL) {
+    return;
+  }
+
+  //
+  // Skip placeholder/empty banner lines (e.g. an unpopulated battery row).
+  //
+  if (Utf8[0] == '\0') {
+    FreePool (Utf8);
+    return;
+  }
+
+  Label = lv_label_create (Parent);
+  lv_label_set_long_mode (Label, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width (Label, LV_PCT (100));
+  lv_label_set_text (Label, Utf8);
+  lv_obj_set_style_text_font (Label, THEME_FONT_BODY, 0);
+  lv_obj_set_style_text_color (Label, lv_color_hex (THEME_COLOR_TEXT_PRIMARY), 0);
+
+  switch (Banner->Alignment) {
+    case EFI_IFR_BANNER_ALIGN_CENTER:
+      lv_obj_set_style_text_align (Label, LV_TEXT_ALIGN_CENTER, 0);
+      //
+      // The centered line is the device model; give it the title font and
+      // accent color so it reads as the banner heading.
+      //
+      lv_obj_set_style_text_font (Label, THEME_FONT_TITLE, 0);
+      lv_obj_set_style_text_color (Label, lv_color_hex (THEME_COLOR_ACCENT_HOVER), 0);
+      break;
+
+    case EFI_IFR_BANNER_ALIGN_RIGHT:
+      lv_obj_set_style_text_align (Label, LV_TEXT_ALIGN_RIGHT, 0);
+      break;
+
+    default:
+      lv_obj_set_style_text_align (Label, LV_TEXT_ALIGN_LEFT, 0);
+      break;
+  }
+
+  FreePool (Utf8);
+}
+
 STATIC
 VOID
 CreateCheckboxWidget (
@@ -1640,6 +1855,7 @@ CreateCheckboxWidget (
 {
   CHAR8                   *Text;
   lv_obj_t                *Row;
+  lv_obj_t                *Label;
   lv_obj_t                *Cb;
   LVGL_STATEMENT_CONTEXT  *Ctx;
 
@@ -1651,9 +1867,21 @@ CreateCheckboxWidget (
     MarkRowChanged (Row);
   }
 
+  //
+  // Prompt label on the left, growing to fill the row so the checkbox
+  // control aligns to the right edge, consistent with ONE_OF and numeric
+  // rows.
+  //
+  Label = lv_label_create (Row);
+  lv_label_set_text (Label, Text != NULL ? Text : "Checkbox");
+  lv_obj_set_flex_grow (Label, 1);
+
+  //
+  // The checkbox itself renders the indicator only; its prompt text is
+  // provided by the label above rather than by the checkbox widget.
+  //
   Cb = lv_checkbox_create (Row);
-  lv_checkbox_set_text (Cb, Text != NULL ? Text : "Checkbox");
-  lv_obj_set_flex_grow (Cb, 1);
+  lv_checkbox_set_text (Cb, "");
   lv_obj_set_style_bg_opa (Cb, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_border_width (Cb, 0, LV_PART_MAIN);
 
@@ -1769,6 +1997,157 @@ CreateNumericWidget (
   AddToNavGroup (Group, Ta, Ctx);
   BindRowFocus (Ta, Row);
   BindRowHover (Ta, Row, Ctx);
+
+  if (Text != NULL) {
+    FreePool (Text);
+  }
+}
+
+/**
+  Create one digit-only textarea sub-field for a Date/Time row. ENTER commits
+  the whole question via OnDateTimeReady (shared @a DtCtx). @a HelpCtx drives
+  the help pane on focus/hover.
+**/
+STATIC
+lv_obj_t *
+CreateDateTimeField (
+  IN lv_obj_t                *Row,
+  IN UINT64                  Value,
+  IN UINTN                   Digits,
+  IN lv_group_t              *Group,
+  IN LVGL_DATETIME_CTX       *DtCtx,
+  IN LVGL_STATEMENT_CONTEXT  *HelpCtx
+  )
+{
+  lv_obj_t  *Ta;
+  CHAR8     Buf[16];
+
+  Ta = lv_textarea_create (Row);
+  lv_textarea_set_one_line (Ta, true);
+  lv_textarea_set_accepted_chars (Ta, "0123456789");
+  lv_textarea_set_max_length (Ta, (uint32_t)Digits);
+
+  Uint64ToAsciiDecimal (Value, Buf, sizeof (Buf));
+  lv_textarea_set_text (Ta, Buf);
+
+  //
+  // Roughly size the field to its digit count (glyph ~12 px + padding).
+  //
+  lv_obj_set_width (Ta, (lv_coord_t)(Digits * 12 + 28));
+
+  lv_obj_add_event_cb (Ta, OnDateTimeReady, LV_EVENT_READY, DtCtx);
+
+  //
+  // Reuse the numeric on-screen keyboard (user_data 1 = NUMBER mode).
+  //
+  lv_obj_add_event_cb (Ta, OnTextareaFocused,   LV_EVENT_FOCUSED,   (void *)(UINTN)1);
+  lv_obj_add_event_cb (Ta, OnTextareaFocused,   LV_EVENT_CLICKED,   (void *)(UINTN)1);
+  lv_obj_add_event_cb (Ta, OnTextareaDefocused, LV_EVENT_DEFOCUSED, NULL);
+
+  AddToNavGroup (Group, Ta, HelpCtx);
+  return Ta;
+}
+
+/**
+  Render an EFI_IFR_DATE_OP (M/D/Y) or EFI_IFR_TIME_OP (H:M:S) question as a
+  row of three digit-only textareas separated by "/" or ":". Editing any
+  field and pressing ENTER commits the full date/time value to the browser.
+**/
+STATIC
+VOID
+CreateDateTimeWidget (
+  lv_obj_t                        *Parent,
+  FORM_DISPLAY_ENGINE_STATEMENT   *Statement,
+  EFI_HII_HANDLE                  HiiHandle,
+  lv_group_t                      *Group,
+  BOOLEAN                         IsDate
+  )
+{
+  CHAR8                   *Text;
+  lv_obj_t                *Row;
+  lv_obj_t                *Label;
+  lv_obj_t                *Sep;
+  LVGL_DATETIME_CTX       *DtCtx;
+  LVGL_STATEMENT_CONTEXT  *HelpCtx;
+  UINT64                  C0;
+  UINT64                  C1;
+  UINT64                  C2;
+  CONST CHAR8             *SepText;
+  UINTN                   Field2Digits;
+
+  Text = GetPromptUtf8 (Statement, HiiHandle);
+
+  Row = lv_obj_create (Parent);
+  StyleRow (Row);
+  if (Statement->SettingChangedFlag) {
+    MarkRowChanged (Row);
+  }
+
+  Label = lv_label_create (Row);
+  lv_label_set_text (Label, Text != NULL ? Text : (IsDate ? "Date" : "Time"));
+  lv_obj_set_flex_grow (Label, 1);
+
+  if (IsDate) {
+    C0           = ClampU64 (Statement->CurrentValue.Value.date.Month, 1, 12);
+    C1           = ClampU64 (Statement->CurrentValue.Value.date.Day, 1, 31);
+    C2           = ClampU64 (Statement->CurrentValue.Value.date.Year, 1998, 2099);
+    SepText      = "/";
+    Field2Digits = 4;
+  } else {
+    C0           = ClampU64 (Statement->CurrentValue.Value.time.Hour, 0, 23);
+    C1           = ClampU64 (Statement->CurrentValue.Value.time.Minute, 0, 59);
+    C2           = ClampU64 (Statement->CurrentValue.Value.time.Second, 0, 59);
+    SepText      = ":";
+    Field2Digits = 2;
+  }
+
+  DtCtx   = AllocateZeroPool (sizeof (LVGL_DATETIME_CTX));
+  HelpCtx = AllocateZeroPool (sizeof (LVGL_STATEMENT_CONTEXT));
+  if ((DtCtx == NULL) || (HelpCtx == NULL)) {
+    if (DtCtx != NULL) {
+      FreePool (DtCtx);
+    }
+
+    if (HelpCtx != NULL) {
+      FreePool (HelpCtx);
+    }
+
+    if (Text != NULL) {
+      FreePool (Text);
+    }
+
+    return;
+  }
+
+  DtCtx->Statement   = Statement;
+  DtCtx->IsDate      = IsDate;
+  HelpCtx->Statement = Statement;
+
+  DtCtx->Field0 = CreateDateTimeField (Row, C0, 2, Group, DtCtx, HelpCtx);
+
+  Sep = lv_label_create (Row);
+  lv_label_set_text (Sep, SepText);
+
+  DtCtx->Field1 = CreateDateTimeField (Row, C1, 2, Group, DtCtx, HelpCtx);
+
+  Sep = lv_label_create (Row);
+  lv_label_set_text (Sep, SepText);
+
+  DtCtx->Field2 = CreateDateTimeField (Row, C2, Field2Digits, Group, DtCtx, HelpCtx);
+
+  if (Statement->Attribute & HII_DISPLAY_GRAYOUT) {
+    lv_obj_add_state (Row, LV_STATE_DISABLED);
+    lv_obj_add_state (DtCtx->Field0, LV_STATE_DISABLED);
+    lv_obj_add_state (DtCtx->Field1, LV_STATE_DISABLED);
+    lv_obj_add_state (DtCtx->Field2, LV_STATE_DISABLED);
+  }
+
+  BindRowFocus (DtCtx->Field0, Row);
+  BindRowFocus (DtCtx->Field1, Row);
+  BindRowFocus (DtCtx->Field2, Row);
+  BindRowHover (DtCtx->Field0, Row, HelpCtx);
+  BindRowHover (DtCtx->Field1, Row, HelpCtx);
+  BindRowHover (DtCtx->Field2, Row, HelpCtx);
 
   if (Text != NULL) {
     FreePool (Text);
@@ -2006,9 +2385,8 @@ CreateOrderedListWidget (
   lv_obj_set_style_pad_all (Panel, THEME_PAD_ROW, 0);
   lv_obj_set_style_border_width (Panel, 0, 0);
   lv_obj_set_style_bg_opa (Panel, LV_OPA_TRANSP, 0);
-  if (Grayout) {
-    lv_obj_set_style_text_color (Panel, lv_color_hex (THEME_COLOR_ROW_TEXT_DISABLED), 0);
-  }
+  lv_obj_set_style_text_color (Panel, lv_color_hex (
+      Grayout ? THEME_COLOR_ROW_TEXT_DISABLED : THEME_COLOR_TEXT_PRIMARY), 0);
 
   Header = lv_label_create (Panel);
   lv_label_set_text (Header, PromptText != NULL ? PromptText : "Ordered List");
@@ -2069,6 +2447,8 @@ CreateOrderedListWidget (
     Label = lv_label_create (Row);
     lv_label_set_text (Label, OptStr8 != NULL ? OptStr8 : "?");
     lv_obj_set_flex_grow (Label, 1);
+    lv_obj_set_style_text_color (Label, lv_color_hex (
+        Grayout ? THEME_COLOR_ROW_TEXT_DISABLED : THEME_COLOR_TEXT_PRIMARY), 0);
 
     if (OptStr8 != NULL) {
       FreePool (OptStr8);
@@ -2337,6 +2717,33 @@ BuildFormWidgets (
         CreateActionWidget (Session->Screen, Statement, HiiHandle, Session->Group);
         break;
 
+      case EFI_IFR_DATE_OP:
+        CreateDateTimeWidget (Session->Screen, Statement, HiiHandle, Session->Group, TRUE);
+        break;
+
+      case EFI_IFR_TIME_OP:
+        CreateDateTimeWidget (Session->Screen, Statement, HiiHandle, Session->Group, FALSE);
+        break;
+
+      case EFI_IFR_GUID_OP:
+        //
+        // Front-page banner lines (model / BIOS version / CPU / memory /
+        // battery) are Tiano GUIDed EFI_IFR_EXTEND_OP_BANNER opcodes. The
+        // text engine drew these via CustomizedDisplayLib; render them here
+        // so the front-page banner isn't lost. All other GUIDed opcodes
+        // (labels, class/subclass) are display-only and safely ignored.
+        //
+        if (CompareGuid (
+              (EFI_GUID *)((UINT8 *)Statement->OpCode + sizeof (EFI_IFR_OP_HEADER)),
+              &gEfiIfrTianoGuid
+              ) &&
+            (((EFI_IFR_GUID_LABEL *)Statement->OpCode)->ExtendOpCode == EFI_IFR_EXTEND_OP_BANNER))
+        {
+          CreateBannerWidget (Session->Screen, Statement, HiiHandle);
+        }
+
+        break;
+
       default:
         DEBUG ((DEBUG_VERBOSE, "LvglRenderer: skipping opcode 0x%02x\n", Statement->OpCode->OpCode));
         break;
@@ -2465,6 +2872,22 @@ LvglRenderForm (
   lv_screen_load (mSession.Screen);
 
   //
+  // Restore the selection the browser asked to highlight
+  //
+  if (FormData->HighLightedStatement != NULL) {
+    UINTN  FocusIdx;
+
+    lv_obj_update_layout (mSession.Screen);
+    for (FocusIdx = 0; FocusIdx < mNavCount; FocusIdx++) {
+      if (mNavStatement[FocusIdx] == FormData->HighLightedStatement) {
+        lv_group_focus_obj (mNavList[FocusIdx]);
+        lv_obj_scroll_to_view (mNavList[FocusIdx], LV_ANIM_OFF);
+        break;
+      }
+    }
+  }
+
+  //
   // LVGL event loop — run until user makes a selection or presses ESC.
   //
   DEBUG ((DEBUG_INFO, "LvglRenderer: entering event loop for FormId=0x%x\n", FormData->FormId));
@@ -2567,6 +2990,319 @@ LvglRunConfirmPopup (
     mPopupResult   = LVGL_POPUP_PENDING;
     return Result;
   }
+}
+
+//
+// ---- EFI_HII_POPUP_PROTOCOL backing popup ----
+//
+
+/**
+  Dismiss the HII popup, recording the chosen selection.
+**/
+STATIC
+VOID
+CloseHiiPopup (
+  IN INT32  Selection
+  )
+{
+  mHiiPopupSel = Selection;
+  if (mHiiPopupOverlay != NULL) {
+    lv_obj_delete (mHiiPopupOverlay);
+    mHiiPopupOverlay = NULL;
+    mHiiPopupFirst   = NULL;
+    mHiiPopupLast    = NULL;
+  }
+}
+
+/**
+  HII popup button click — user_data encodes (selection + 1).
+**/
+STATIC
+VOID
+OnHiiPopupBtn (
+  lv_event_t  *Event
+  )
+{
+  CloseHiiPopup ((INT32)(UINTN)lv_event_get_user_data (Event) - 1);
+}
+
+/**
+  HII popup keyboard handling: Y/N shortcuts, ESC (cancel/no), and
+  LEFT/RIGHT/UP/DOWN to move between buttons without escaping the popup.
+**/
+STATIC
+VOID
+OnHiiPopupKey (
+  lv_event_t  *Event
+  )
+{
+  lv_key_t  Key;
+  lv_obj_t  *Focused;
+
+  Key = lv_indev_get_key (lv_indev_active ());
+
+  if (((Key == 'Y') || (Key == 'y')) && (mHiiPopupYesSel != LVGL_HII_POPUP_PENDING)) {
+    CloseHiiPopup (mHiiPopupYesSel);
+    lv_event_stop_processing (Event);
+    return;
+  }
+
+  if (((Key == 'N') || (Key == 'n')) && (mHiiPopupNoSel != LVGL_HII_POPUP_PENDING)) {
+    CloseHiiPopup (mHiiPopupNoSel);
+    lv_event_stop_processing (Event);
+    return;
+  }
+
+  if (Key == LV_KEY_ESC) {
+    CloseHiiPopup (mHiiPopupEscSel);
+    lv_event_stop_processing (Event);
+    return;
+  }
+
+  if (mHiiPopupGroup == NULL) {
+    return;
+  }
+
+  if ((Key == LV_KEY_LEFT) || (Key == LV_KEY_UP)) {
+    Focused = lv_group_get_focused (mHiiPopupGroup);
+    if (Focused != mHiiPopupFirst) {
+      lv_group_focus_prev (mHiiPopupGroup);
+    }
+
+    lv_event_stop_processing (Event);
+  } else if ((Key == LV_KEY_RIGHT) || (Key == LV_KEY_DOWN)) {
+    Focused = lv_group_get_focused (mHiiPopupGroup);
+    if (Focused != mHiiPopupLast) {
+      lv_group_focus_next (mHiiPopupGroup);
+    }
+
+    lv_event_stop_processing (Event);
+  }
+}
+
+/**
+  Add one button to the HII popup button row.
+**/
+STATIC
+lv_obj_t *
+AddHiiPopupButton (
+  IN lv_obj_t     *Row,
+  IN lv_group_t   *Group,
+  IN CONST CHAR8  *Label,
+  IN INT32        Selection
+  )
+{
+  lv_obj_t  *Btn;
+  lv_obj_t  *Lbl;
+
+  Btn = lv_btn_create (Row);
+  Lbl = lv_label_create (Btn);
+  lv_label_set_text (Lbl, Label);
+  lv_obj_add_event_cb (Btn, OnHiiPopupBtn, LV_EVENT_CLICKED, (void *)(UINTN)(Selection + 1));
+  lv_obj_add_event_cb (Btn, OnHiiPopupKey, LV_EVENT_KEY, NULL);
+  lv_group_add_obj (Group, Btn);
+  return Btn;
+}
+
+/**
+  Build the modal HII popup UI on the top layer.
+**/
+STATIC
+VOID
+ShowHiiPopup (
+  IN lv_group_t           *Group,
+  IN CONST CHAR8          *Title,
+  IN CONST CHAR8          *Message,
+  IN EFI_HII_POPUP_TYPE   PopupType
+  )
+{
+  lv_obj_t  *Overlay;
+  lv_obj_t  *Card;
+  lv_obj_t  *TitleLbl;
+  lv_obj_t  *Sep;
+  lv_obj_t  *MsgLbl;
+  lv_obj_t  *BtnRow;
+
+  mHiiPopupSel    = LVGL_HII_POPUP_PENDING;
+  mHiiPopupYesSel = LVGL_HII_POPUP_PENDING;
+  mHiiPopupNoSel  = LVGL_HII_POPUP_PENDING;
+  mHiiPopupEscSel = LVGL_HII_POPUP_PENDING;
+  mHiiPopupGroup  = Group;
+
+  Overlay = lv_obj_create (lv_layer_top ());
+  lv_obj_set_size (Overlay, LV_PCT (100), LV_PCT (100));
+  lv_obj_set_style_bg_color (Overlay, lv_color_black (), 0);
+  lv_obj_set_style_bg_opa (Overlay, THEME_OVERLAY_OPA, 0);
+  lv_obj_set_style_border_width (Overlay, 0, 0);
+  lv_obj_set_style_pad_all (Overlay, 0, 0);
+  lv_obj_set_flex_flow (Overlay, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align (Overlay, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  mHiiPopupOverlay = Overlay;
+
+  Card = lv_obj_create (Overlay);
+  lv_obj_set_width (Card, LV_PCT (THEME_DIALOG_WIDTH_PCT));
+  lv_obj_set_height (Card, LV_SIZE_CONTENT);
+  lv_obj_set_flex_flow (Card, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_style_pad_all (Card, THEME_PAD_DIALOG, 0);
+  lv_obj_set_style_pad_row (Card, THEME_PAD_DIALOG_ROW_GAP, 0);
+  lv_obj_set_style_bg_color (Card, lv_color_hex (THEME_COLOR_BG_DIALOG), 0);
+  lv_obj_set_style_radius (Card, THEME_RADIUS, 0);
+  lv_obj_set_style_border_width (Card, 0, 0);
+
+  TitleLbl = lv_label_create (Card);
+  lv_label_set_text (TitleLbl, Title);
+  lv_obj_set_style_text_font (TitleLbl, THEME_FONT_POPUP, 0);
+  lv_obj_set_style_text_color (TitleLbl, lv_color_hex (THEME_COLOR_TEXT_TITLE), 0);
+
+  Sep = lv_obj_create (Card);
+  lv_obj_set_size (Sep, LV_PCT (100), THEME_BORDER_PANE);
+  lv_obj_set_style_bg_color (Sep, lv_color_hex (THEME_COLOR_BG_SEPARATOR), 0);
+  lv_obj_set_style_border_width (Sep, 0, 0);
+  lv_obj_set_style_pad_all (Sep, 0, 0);
+
+  MsgLbl = lv_label_create (Card);
+  lv_label_set_long_mode (MsgLbl, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width (MsgLbl, LV_PCT (100));
+  lv_label_set_text (MsgLbl, Message);
+  lv_obj_set_style_text_color (MsgLbl, lv_color_hex (THEME_COLOR_TEXT_POPUP), 0);
+
+  BtnRow = lv_obj_create (Card);
+  lv_obj_set_size (BtnRow, LV_PCT (100), LV_SIZE_CONTENT);
+  lv_obj_set_flex_flow (BtnRow, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align (BtnRow, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_all (BtnRow, 0, 0);
+  lv_obj_set_style_border_width (BtnRow, 0, 0);
+  lv_obj_set_style_bg_opa (BtnRow, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_pad_column (BtnRow, THEME_PAD_DIALOG_COL_GAP, 0);
+
+  switch (PopupType) {
+    case EfiHiiPopupTypeOk:
+      mHiiPopupFirst  = AddHiiPopupButton (BtnRow, Group, "OK", EfiHiiPopupSelectionOk);
+      mHiiPopupLast   = mHiiPopupFirst;
+      mHiiPopupEscSel = EfiHiiPopupSelectionOk;
+      break;
+
+    case EfiHiiPopupTypeOkCancel:
+      mHiiPopupFirst  = AddHiiPopupButton (BtnRow, Group, "OK", EfiHiiPopupSelectionOk);
+      mHiiPopupLast   = AddHiiPopupButton (BtnRow, Group, "Cancel", EfiHiiPopupSelectionCancel);
+      mHiiPopupEscSel = EfiHiiPopupSelectionCancel;
+      break;
+
+    case EfiHiiPopupTypeYesNoCancel:
+      mHiiPopupFirst  = AddHiiPopupButton (BtnRow, Group, "Yes (Y)", EfiHiiPopupSelectionYes);
+      (VOID)AddHiiPopupButton (BtnRow, Group, "No (N)", EfiHiiPopupSelectionNo);
+      mHiiPopupLast   = AddHiiPopupButton (BtnRow, Group, "Cancel", EfiHiiPopupSelectionCancel);
+      mHiiPopupYesSel = EfiHiiPopupSelectionYes;
+      mHiiPopupNoSel  = EfiHiiPopupSelectionNo;
+      mHiiPopupEscSel = EfiHiiPopupSelectionCancel;
+      break;
+
+    case EfiHiiPopupTypeYesNo:
+    default:
+      mHiiPopupFirst  = AddHiiPopupButton (BtnRow, Group, "Yes (Y)", EfiHiiPopupSelectionYes);
+      mHiiPopupLast   = AddHiiPopupButton (BtnRow, Group, "No (N)", EfiHiiPopupSelectionNo);
+      mHiiPopupYesSel = EfiHiiPopupSelectionYes;
+      mHiiPopupNoSel  = EfiHiiPopupSelectionNo;
+      mHiiPopupEscSel = EfiHiiPopupSelectionNo;
+      break;
+  }
+
+  if (mHiiPopupFirst != NULL) {
+    lv_group_focus_obj (mHiiPopupFirst);
+  }
+}
+
+EFI_STATUS
+EFIAPI
+LvglHiiCreatePopup (
+  IN  EFI_HII_POPUP_STYLE      PopupStyle,
+  IN  EFI_HII_POPUP_TYPE       PopupType,
+  IN  EFI_HII_HANDLE           HiiHandle,
+  IN  EFI_STRING_ID            Message,
+  OUT EFI_HII_POPUP_SELECTION  *UserSelection OPTIONAL
+  )
+{
+  lv_group_t      *PopupGroup;
+  lv_indev_t      *Indev;
+  CHAR16          *Ucs2;
+  CHAR8           *Utf8;
+  CONST CHAR8     *Title;
+  extern BOOLEAN  mTickSupport;
+
+  if (!mLvglReady) {
+    return EFI_DEVICE_ERROR;
+  }
+
+  Ucs2 = HiiGetString (HiiHandle, Message, NULL);
+  if (Ucs2 == NULL) {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  Utf8 = Ucs2ToUtf8 (Ucs2);
+  FreePool (Ucs2);
+  if (Utf8 == NULL) {
+    return EFI_OUT_OF_RESOURCES;
+  }
+
+  switch (PopupStyle) {
+    case EfiHiiPopupStyleError:
+      Title = "Error";
+      break;
+    case EfiHiiPopupStyleWarning:
+      Title = "Warning";
+      break;
+    default:
+      Title = "Confirm";
+      break;
+  }
+
+  //
+  // Isolate the keypad indev on a dedicated group so keys drive the popup
+  // buttons, not the (still-loaded) form behind it.
+  //
+  PopupGroup = lv_group_create ();
+  Indev      = NULL;
+  while ((Indev = lv_indev_get_next (Indev)) != NULL) {
+    if (lv_indev_get_type (Indev) == LV_INDEV_TYPE_KEYPAD) {
+      lv_indev_set_group (Indev, PopupGroup);
+    }
+  }
+
+  ShowHiiPopup (PopupGroup, Title, Utf8, PopupType);
+
+  //
+  // Drain pending keystrokes so the popup isn't dismissed by a stale key.
+  //
+  lv_uefi_keypad_drain ();
+
+  while (mHiiPopupSel == LVGL_HII_POPUP_PENDING) {
+    lv_timer_handler ();
+    gBS->Stall (10 * 1000);
+    if (!mTickSupport) {
+      lv_tick_inc (10);
+    }
+  }
+
+  //
+  // Restore the keypad indev to the form group and drain the confirming key.
+  //
+  Indev = NULL;
+  while ((Indev = lv_indev_get_next (Indev)) != NULL) {
+    if (lv_indev_get_type (Indev) == LV_INDEV_TYPE_KEYPAD) {
+      lv_indev_set_group (Indev, mSession.Group);
+    }
+  }
+
+  lv_group_delete (PopupGroup);
+  mHiiPopupGroup = NULL;
+  lv_uefi_keypad_drain ();
+
+  if (UserSelection != NULL) {
+    *UserSelection = (EFI_HII_POPUP_SELECTION)mHiiPopupSel;
+  }
+
+  FreePool (Utf8);
+  return EFI_SUCCESS;
 }
 
 VOID

@@ -34,6 +34,32 @@ typedef struct {
 STATIC LVGL_DISPLAY_ENGINE_PRIVATE_DATA  mPrivateData;
 
 /**
+  EFI_HII_POPUP_PROTOCOL.CreatePopup thunk — delegates to the LVGL renderer's
+  modal popup. In stock EDK2 this protocol is produced by DisplayEngineDxe;
+  driver callbacks (e.g. SecureBootConfigDxe's "Reset Secure Boot Keys" Yes/No
+  confirmation) locate it, so the LVGL engine must produce it too.
+**/
+STATIC
+EFI_STATUS
+EFIAPI
+LvglHiiPopupCreate (
+  IN  EFI_HII_POPUP_PROTOCOL   *This,
+  IN  EFI_HII_POPUP_STYLE      PopupStyle,
+  IN  EFI_HII_POPUP_TYPE       PopupType,
+  IN  EFI_HII_HANDLE           HiiHandle,
+  IN  EFI_STRING_ID            Message,
+  OUT EFI_HII_POPUP_SELECTION  *UserSelection OPTIONAL
+  )
+{
+  return LvglHiiCreatePopup (PopupStyle, PopupType, HiiHandle, Message, UserSelection);
+}
+
+STATIC EFI_HII_POPUP_PROTOCOL  mHiiPopup = {
+  EFI_HII_POPUP_PROTOCOL_REVISION,
+  LvglHiiPopupCreate
+};
+
+/**
   Display one form and return user input.
 
   @param[in]  FormData        Form data to be displayed.
@@ -116,6 +142,18 @@ LvglDisplayEngineInit (
                   &gEdkiiFormDisplayEngineProtocolGuid,
                   EFI_NATIVE_INTERFACE,
                   &mPrivateData.Protocol
+                  );
+  ASSERT_EFI_ERROR (Status);
+
+  //
+  // Also produce EFI_HII_POPUP_PROTOCOL (normally produced by DisplayEngineDxe,
+  // which we replace) so driver callbacks can raise Yes/No confirmations.
+  //
+  Status = gBS->InstallProtocolInterface (
+                  &mPrivateData.Handle,
+                  &gEfiHiiPopupProtocolGuid,
+                  EFI_NATIVE_INTERFACE,
+                  &mHiiPopup
                   );
   ASSERT_EFI_ERROR (Status);
 

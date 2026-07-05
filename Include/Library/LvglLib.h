@@ -66,4 +66,15 @@ lv_uefi_keypad_drain (
   void
   );
 
+/**
+  Report whether a usable pointer (mouse) is currently present. Returns TRUE
+  only after genuine pointer motion or a click has been observed, so callers
+  can suppress mouse-only UI (such as the on-screen keyboard) on keyboard-only
+  machines.
+**/
+bool
+lv_uefi_pointer_is_present (
+  void
+  );
+
 #endif
