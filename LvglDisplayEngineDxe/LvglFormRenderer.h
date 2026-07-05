@@ -1,5 +1,5 @@
 /** @file
-  LVGL Form Renderer — builds LVGL widgets from FORM_DISPLAY_ENGINE_FORM.
+  LVGL Form Renderer -- builds LVGL widgets from FORM_DISPLAY_ENGINE_FORM.
 
   Copyright (c) 2024-2026, Hamit Karaca. All rights reserved.<BR>
   SPDX-License-Identifier: BSD-2-Clause-Patent

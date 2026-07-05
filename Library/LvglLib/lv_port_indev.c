@@ -17,7 +17,7 @@
  * (lv_uefi_display_create, LV_USE_UEFI=1) is unchanged; only the pointer indev
  * reverts to custom.
  *
- * Wheel ratchet: accumulate raw Z counts, emit one scroll step (±40 px) per
+ * Wheel ratchet: accumulate raw Z counts, emit one scroll step (+/-40 px) per
  * LVGL_WHEEL_COUNTS_PER_DETENT=8 raw counts.  Scroll is applied directly to the
  * nearest scrollable ancestor under the cursor via lv_obj_scroll_by_bounded(),
  * bypassing LVGL's normal click-first-to-scroll-later requirement.
@@ -26,7 +26,7 @@
  * with AbsoluteMaxX/Y == 0 until a physical USB mouse binds.  mouse_read checks
  * the live range each frame and simply reports the last cursor position /
  * RELEASED state when the range is zero, so the indev "just starts working"
- * once USB binds — no retry logic is needed.
+ * once USB binds -- no retry logic is needed.
  *
  * PR#17 lazy-binding (RegisterProtocolNotify) is kept as cheap insurance for
  * the case where the protocol itself is absent at init time; the callback
@@ -77,7 +77,7 @@ static lv_indev_t *indev_mouse  = NULL;
 static lv_indev_t *indev_keypad = NULL;
 
 //
-// Pointer state — owned exclusively by mouse_read.
+// Pointer state -- owned exclusively by mouse_read.
 //
 STATIC EFI_ABSOLUTE_POINTER_PROTOCOL *mAbsPointer   = NULL;
 STATIC INTN                           mLastCursorX   = 0;
@@ -153,7 +153,7 @@ mouse_read (
   INT32                        ver_res;
 
   //
-  // Lazy-acquire the protocol — succeeds after USB/ConSplitter have bound.
+  // Lazy-acquire the protocol -- succeeds after USB/ConSplitter have bound.
   //
   if (mAbsPointer == NULL) {
     gBS->HandleProtocol (
