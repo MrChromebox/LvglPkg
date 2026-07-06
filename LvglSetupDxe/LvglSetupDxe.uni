@@ -1,0 +1,22 @@
+// *++
+//
+// String definitions for the LVGL UI configuration formset.
+//
+// Copyright (c) 2026, MrChromebox. All rights reserved.<BR>
+// SPDX-License-Identifier: BSD-2-Clause-Patent
+//
+// --*/
+
+/=#
+
+#langdef en-US "English"
+
+#string STR_FORM_SET_TITLE       #language en-US  "Graphical UI Configuration"
+#string STR_FORM_SET_TITLE_HELP  #language en-US  "Configure the graphical setup UI."
+
+#string STR_UI_SCALE_PROMPT      #language en-US  "UI Scale"
+#string STR_UI_SCALE_HELP        #language en-US  "Scale factor for the graphical setup UI. Larger values make text and controls physically bigger on high-resolution displays. A reboot is required for a change to take effect."
+
+#string STR_UI_SCALE_1X          #language en-US  "1x (native)"
+#string STR_UI_SCALE_1_5X        #language en-US  "1.5x"
+#string STR_UI_SCALE_2X          #language en-US  "2x"
