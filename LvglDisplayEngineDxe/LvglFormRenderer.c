@@ -1,5 +1,5 @@
 /** @file
-  LVGL Form Renderer — creates LVGL widgets from FORM_DISPLAY_ENGINE_FORM.
+  LVGL Form Renderer -- creates LVGL widgets from FORM_DISPLAY_ENGINE_FORM.
 
   Walks the StatementListHead provided by SetupBrowserDxe and maps each
   IFR opcode to a corresponding LVGL widget. Runs the LVGL event loop
@@ -40,7 +40,7 @@ STATIC lv_obj_t  *mEditingDropdown        = NULL;
 STATIC UINT32     mEditingDropdownOrigSel = 0;
 
 //
-// Popup state — shared by the F10 in-loop overlay and LvglRunConfirmPopup.
+// Popup state -- shared by the F10 in-loop overlay and LvglRunConfirmPopup.
 //
 #define LVGL_POPUP_PENDING  0xFFFFFFFFU
 
@@ -331,7 +331,7 @@ IsFrontPageForm (
 }
 
 /**
-  Generic click handler — records the statement selection and requests exit.
+  Generic click handler -- records the statement selection and requests exit.
 **/
 STATIC
 VOID
@@ -366,7 +366,7 @@ OnStatementClicked (
   text-entry textarea gains focus we re-bind the keyboard to it and reveal
   it; on defocus we hide it again. lv_keyboard's default event callback
   forwards LV_EVENT_READY/CANCEL to the bound textarea, so the existing
-  OnStringReady / OnNumericReady commit paths still fire — we only need to
+  OnStringReady / OnNumericReady commit paths still fire -- we only need to
   manage visibility here.
 
   user_data on the textarea event: (uintptr_t)1 = numeric mode, else text.
@@ -437,7 +437,7 @@ OnKeyboardCancel (
 }
 
 /**
-  String textarea commit — fires on LV_EVENT_READY (Enter key).
+  String textarea commit -- fires on LV_EVENT_READY (Enter key).
   Reads the typed UTF-8 text, converts to UTF-16, fills InputValue.Buffer,
   and registers a new HII string so SetupBrowserDxe can persist the value.
 **/
@@ -534,7 +534,7 @@ OnStringReady (
 }
 
 /**
-  Checkbox value-changed handler — toggles the boolean and records it.
+  Checkbox value-changed handler -- toggles the boolean and records it.
 **/
 STATIC
 VOID
@@ -564,7 +564,7 @@ OnCheckboxChanged (
 }
 
 /**
-  Dropdown opened handler — sizes the popup list to its content so long
+  Dropdown opened handler -- sizes the popup list to its content so long
   option strings are not truncated by the (narrow) button width.
 **/
 STATIC
@@ -584,7 +584,7 @@ OnDropdownOpened (
 }
 
 /**
-  Dropdown value-changed handler — records the selected option index.
+  Dropdown value-changed handler -- records the selected option index.
 **/
 STATIC
 VOID
@@ -655,7 +655,7 @@ OnDropdownChanged (
 }
 
 /**
-  Ordered-list Up/Down button handler — swaps two entries in the buffer
+  Ordered-list Up/Down button handler -- swaps two entries in the buffer
   and emits the reordered buffer via USER_INPUT so SetupBrowserDxe
   re-invokes FormDisplay() with the updated state.
 **/
@@ -707,7 +707,7 @@ OnOrderedListMove (
 }
 
 /**
-  Popup button click handler — records the chosen action and dismisses overlay.
+  Popup button click handler -- records the chosen action and dismisses overlay.
 **/
 STATIC
 VOID
@@ -986,7 +986,7 @@ HandleFunctionKey (
 }
 
 /**
-  Indev-level ESC fallback — LVGL only routes LV_EVENT_KEY to a focused widget,
+  Indev-level ESC fallback -- LVGL only routes LV_EVENT_KEY to a focused widget,
   so forms with no focusable items (e.g. an empty Driver Health Manager form)
   would eat ESC. This handler runs on every keypress the indev produces, and
   handles ESC whenever OnNavKey wouldn't fire because nothing is focused.
@@ -1006,7 +1006,7 @@ OnIndevFallbackKey (
   Key   = lv_indev_get_key (Indev);
 
   //
-  // Popup is open — OnPopupKey handles all keys for popup buttons.
+  // Popup is open -- OnPopupKey handles all keys for popup buttons.
   //
   if (mPopupOverlay != NULL) {
     return;
@@ -1022,7 +1022,7 @@ OnIndevFallbackKey (
   if ((Key == LV_KEY_UP) || (Key == LV_KEY_DOWN)) {
     //
     // Special case: a ONE_OF dropdown that is currently in keyboard-editing
-    // mode (entered via ENTER) cycles its selection LOCALLY — no commit, no
+    // mode (entered via ENTER) cycles its selection LOCALLY -- no commit, no
     // form rebuild.  Commit is deferred to the ENTER-confirm or leave paths
     // in OnNavKey / OnDropdownDefocused.
     //
@@ -1040,7 +1040,7 @@ OnIndevFallbackKey (
         }
 
         lv_dropdown_set_selected (Focused, Sel);
-        // Do NOT send LV_EVENT_VALUE_CHANGED here — commit is deferred.
+        // Do NOT send LV_EVENT_VALUE_CHANGED here -- commit is deferred.
       }
 
       return;
@@ -1074,7 +1074,7 @@ OnIndevFallbackKey (
 
   //
   // Remaining handlers (ESC / F-keys) only fire when nothing is focused or
-  // the focused widget is disabled — when something enabled is focused,
+  // the focused widget is disabled -- when something enabled is focused,
   // its OnNavKey will receive the LV_EVENT_KEY directly.
   //
   if ((Focused != NULL) && !lv_obj_has_state (Focused, LV_STATE_DISABLED)) {
@@ -1083,7 +1083,7 @@ OnIndevFallbackKey (
 
   if (Key == LV_KEY_ESC) {
     //
-    // Front page: no parent form to exit to — swallow ESC so the user can't
+    // Front page: no parent form to exit to -- swallow ESC so the user can't
     // accidentally drop out of setup.
     //
     if (!IsFrontPageForm ()) {
@@ -1192,7 +1192,7 @@ ClampU64 (
 }
 
 /**
-  Numeric textarea commit — fires when the user presses ENTER on a one_line
+  Numeric textarea commit -- fires when the user presses ENTER on a one_line
   textarea (LV_EVENT_READY). Parses the typed text, clamps to the IFR
   Min/Max range, and delivers the new value to the browser.
 **/
@@ -1269,7 +1269,7 @@ typedef struct {
 } LVGL_DATETIME_CTX;
 
 /**
-  Date/Time sub-field commit — fires when ENTER is pressed on any of the
+  Date/Time sub-field commit -- fires when ENTER is pressed on any of the
   three one-line textareas (LV_EVENT_READY). Reads all three fields, clamps
   each to its valid range, and delivers a full EFI_IFR_TYPE_DATE/TIME value.
 
@@ -1391,7 +1391,7 @@ OnNavKey (
   if (Editing) {
     //
     // While a dropdown is in keyboard-edit mode, intercept ENTER (confirm)
-    // and UP/DOWN (already handled by OnIndevFallbackKey — stop them here so
+    // and UP/DOWN (already handled by OnIndevFallbackKey -- stop them here so
     // LVGL's own class handler doesn't also advance or open the list).
     //
     Focused = lv_group_get_focused (mSession.Group);
@@ -1454,14 +1454,14 @@ OnNavKey (
       lv_event_stop_processing (Event);
     }
     //
-    // Textarea: do NOT intercept — Enter passes to the class handler,
-    // which fires LV_EVENT_READY → OnStringReady commits the value.
+    // Textarea: do NOT intercept -- Enter passes to the class handler,
+    // which fires LV_EVENT_READY -> OnStringReady commits the value.
     //
   }
 }
 
 /**
-  LV_EVENT_FOCUSED handler — push the focused statement's Help string into
+  LV_EVENT_FOCUSED handler -- push the focused statement's Help string into
   the chrome's help pane.
 **/
 STATIC
@@ -1490,13 +1490,13 @@ OnFocusUpdateHelp (
 }
 
 /**
-  LV_EVENT_HOVER_OVER handler — update the help pane text while the mouse
+  LV_EVENT_HOVER_OVER handler -- update the help pane text while the mouse
   hovers over a statement row.  Bound to both the inner control widget (via
   AddToNavGroup) AND the Row container (via BindRowHover) so the help pane
   updates regardless of which part of the row the cursor is over.
 
   Keyboard focus changes continue to update the pane via OnFocusUpdateHelp,
-  so the pane is never stale — it just retains the last-hovered row's text
+  so the pane is never stale -- it just retains the last-hovered row's text
   when the cursor moves off all rows, which is the desired behaviour.
 **/
 STATIC
@@ -1576,7 +1576,7 @@ StyleRow (
   lv_obj_set_style_text_color (Row, lv_color_hex (THEME_COLOR_ROW_TEXT), 0);
   lv_obj_set_style_shadow_width (Row, 0, 0);
 
-  // hovered: slight elevation, no border — shows intent before click/focus
+  // hovered: slight elevation, no border -- shows intent before click/focus
   lv_obj_set_style_bg_color (Row, lv_color_hex (THEME_COLOR_ROW_BG_HOVER), LV_STATE_HOVERED);
   lv_obj_set_style_bg_opa (Row, LV_OPA_COVER, LV_STATE_HOVERED);
   lv_obj_set_style_text_color (Row, lv_color_hex (THEME_COLOR_ROW_TEXT_FOCUSED), LV_STATE_HOVERED);
@@ -2377,7 +2377,7 @@ CreateOrderedListWidget (
   PromptText = GetPromptUtf8 (Statement, HiiHandle);
 
   //
-  // Outer panel — vertical flex column holding header + one row per entry.
+  // Outer panel -- vertical flex column holding header + one row per entry.
   //
   Panel = lv_obj_create (Parent);
   lv_obj_set_size (Panel, LV_PCT (100), LV_SIZE_CONTENT);
@@ -2397,7 +2397,7 @@ CreateOrderedListWidget (
 
     //
     // Find the option whose Value matches this slot. Read the option's
-    // Value at its native width — IFR stores it at ValueType size, so
+    // Value at its native width -- IFR stores it at ValueType size, so
     // reading .u64 would over-read into neighboring bytes.
     //
     OptStr8 = NULL;
@@ -2543,7 +2543,7 @@ CreateStringWidget (
   } else {
     //
     // For string fields the current value is stored as an HII string token
-    // in CurrentValue.Value.string — NOT in CurrentValue.Buffer (which is
+    // in CurrentValue.Value.string -- NOT in CurrentValue.Buffer (which is
     // used only for buffer-type questions such as ordered lists).
     //
     if (Statement->CurrentValue.Value.string != 0) {
@@ -2574,7 +2574,7 @@ CreateStringWidget (
 
   //
   // Show the on-screen keyboard when the textarea is focused or clicked.
-  // user_data = 0 → text mode (also covers password, since the keyboard
+  // user_data = 0 -> text mode (also covers password, since the keyboard
   // forwards keys; the textarea's password_mode hides the rendering).
   //
   lv_obj_add_event_cb (Ta, OnTextareaFocused,   LV_EVENT_FOCUSED,   (void *)(UINTN)0);
@@ -2772,7 +2772,7 @@ LvglRenderForm (
   if (!mLvglReady) {
     Status = UefiLvglInit ();
     if (EFI_ERROR (Status)) {
-      DEBUG ((DEBUG_ERROR, "LvglRenderer: UefiLvglInit failed — %r\n", Status));
+      DEBUG ((DEBUG_ERROR, "LvglRenderer: UefiLvglInit failed -- %r\n", Status));
       return Status;
     }
 
@@ -2888,7 +2888,7 @@ LvglRenderForm (
   }
 
   //
-  // LVGL event loop — run until user makes a selection or presses ESC.
+  // LVGL event loop -- run until user makes a selection or presses ESC.
   //
   DEBUG ((DEBUG_INFO, "LvglRenderer: entering event loop for FormId=0x%x\n", FormData->FormId));
 
@@ -2916,7 +2916,7 @@ LvglRenderForm (
 
   //
   // We exit on a key PRESS event (ENTER to commit, ESC to leave). LVGL
-  // hasn't yet seen the matching RELEASE — without draining, LVGL would
+  // hasn't yet seen the matching RELEASE -- without draining, LVGL would
   // deliver the pending LV_EVENT_CLICKED to whatever widget is focused when
   // FormDisplay() is re-invoked, triggering a spurious submenu navigation.
   // lv_indev_wait_release() is NOT suitable here because it eats the entire
@@ -2925,7 +2925,7 @@ LvglRenderForm (
   //
   lv_uefi_keypad_drain ();
 
-  DEBUG ((DEBUG_INFO, "LvglRenderer: exiting event loop — Action=0x%x\n", UserInputData->Action));
+  DEBUG ((DEBUG_INFO, "LvglRenderer: exiting event loop -- Action=0x%x\n", UserInputData->Action));
 
   return EFI_SUCCESS;
 }
@@ -2973,7 +2973,7 @@ LvglRunConfirmPopup (
   }
 
   //
-  // Restore keyboard indev to the form group (still valid — ExitDisplay
+  // Restore keyboard indev to the form group (still valid -- ExitDisplay
   // has not been called yet at this point in the browser flow).
   //
   Indev = NULL;
@@ -3015,7 +3015,7 @@ CloseHiiPopup (
 }
 
 /**
-  HII popup button click — user_data encodes (selection + 1).
+  HII popup button click -- user_data encodes (selection + 1).
 **/
 STATIC
 VOID

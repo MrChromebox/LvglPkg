@@ -34,7 +34,7 @@ typedef struct {
 STATIC LVGL_DISPLAY_ENGINE_PRIVATE_DATA  mPrivateData;
 
 /**
-  EFI_HII_POPUP_PROTOCOL.CreatePopup thunk — delegates to the LVGL renderer's
+  EFI_HII_POPUP_PROTOCOL.CreatePopup thunk -- delegates to the LVGL renderer's
   modal popup. In stock EDK2 this protocol is produced by DisplayEngineDxe;
   driver callbacks (e.g. SecureBootConfigDxe's "Reset Secure Boot Keys" Yes/No
   confirmation) locate it, so the LVGL engine must produce it too.
@@ -75,7 +75,7 @@ LvglFormDisplay (
   OUT USER_INPUT                *UserInputData
   )
 {
-  DEBUG ((DEBUG_INFO, "LvglDisplayEngine: FormDisplay() called — FormId=0x%x\n", FormData->FormId));
+  DEBUG ((DEBUG_INFO, "LvglDisplayEngine: FormDisplay() called -- FormId=0x%x\n", FormData->FormId));
 
   return LvglRenderForm (FormData, UserInputData);
 }
@@ -98,7 +98,7 @@ LvglExitDisplay (
 /**
   Confirm how to handle changed data (submit / discard / none).
 
-  @return Action — BROWSER_ACTION_SUBMIT, BROWSER_ACTION_DISCARD, or BROWSER_ACTION_NONE.
+  @return Action -- BROWSER_ACTION_SUBMIT, BROWSER_ACTION_DISCARD, or BROWSER_ACTION_NONE.
 **/
 STATIC
 UINTN
@@ -113,7 +113,7 @@ LvglConfirmDataChange (
 }
 
 /**
-  Entry point — install EDKII_FORM_DISPLAY_ENGINE_PROTOCOL.
+  Entry point -- install EDKII_FORM_DISPLAY_ENGINE_PROTOCOL.
 
   @param[in] ImageHandle   Driver image handle.
   @param[in] SystemTable   Pointer to EFI System Table.
@@ -187,7 +187,7 @@ LvglDisplayEngineInit (
 }
 
 /**
-  Unload handler — uninstall the protocol.
+  Unload handler -- uninstall the protocol.
 
   @param[in] ImageHandle   Driver image handle.
 
@@ -207,7 +207,7 @@ LvglDisplayEngineUnload (
                   &mPrivateData.Protocol
                   );
 
-  DEBUG ((DEBUG_INFO, "LvglDisplayEngine: unloaded — %r\n", Status));
+  DEBUG ((DEBUG_INFO, "LvglDisplayEngine: unloaded -- %r\n", Status));
 
   return Status;
 }

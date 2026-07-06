@@ -54,12 +54,12 @@
 #define THEME_COLOR_DANGER        0xE25555
 
 //
-// Accent (subtitle / focus highlight) — LV_PALETTE_* enum value
+// Accent (subtitle / focus highlight) -- LV_PALETTE_* enum value
 //
 #define THEME_ACCENT_PALETTE      LV_PALETTE_BLUE
 
 //
-// Fonts — must be enabled in lv_conf.h
+// Fonts -- must be enabled in lv_conf.h
 //
 #define THEME_FONT_TITLE          (&lv_font_montserrat_20)
 #define THEME_FONT_BODY           (&lv_font_montserrat_16)
@@ -101,7 +101,7 @@
 #define THEME_FOOTER_HEIGHT       32
 
 //
-// Chrome — help pane (right column).
+// Chrome -- help pane (right column).
 //
 #define THEME_HELPPANE_WIDTH         240
 #define THEME_PAD_HELPPANE_X         14
@@ -109,7 +109,7 @@
 #define THEME_PAD_HELPPANE_ROW_GAP   8
 
 //
-// Chrome — header / subtitle / content / footer paddings.
+// Chrome -- header / subtitle / content / footer paddings.
 //
 #define THEME_PAD_HEADER_X           16
 #define THEME_PAD_SUBTITLE_X         16
