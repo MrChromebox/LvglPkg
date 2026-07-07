@@ -52,11 +52,13 @@ and maps each to an LVGL widget.
 
 ```
 LvglPkg/
-+--- Library/LvglLib/           LVGL UEFI port (GOP display, mouse, keyboard)
++--- Library/LvglLib/           LVGL UEFI port (display, mouse, keyboard)
 |   +--- LvglLib.c              Init/deinit, tick, main loop
 |   +--- LvglScaledDisplay.c    Logical-canvas upscaling for UI scale
-|   +--- lv_uefi_display.c      GOP flush callback
+|   +--- LvglUefiPort.c/.h      libc shim (malloc/string/etc.) for the LVGL build
 |   +--- lv_port_indev.c        Mouse (AbsolutePointer) + keyboard input
+|   +--- MouseCursorIcon.c      Mouse cursor bitmap used by lv_port_indev.c
+|   +--- EscExitHandler.c       ESC-to-exit confirmation popup handling
 |   `--- lvgl/                  Upstream LVGL source (submodule)
 +--- Library/LvglUiConfigLib/   NVRAM/PCD UI configuration helpers
 +--- LvglDisplayEngineDxe/      Display engine DXE driver (the main deliverable)
@@ -71,6 +73,12 @@ LvglPkg/
 +--- LvglPkg.dec                Package declaration (PCDs)
 `--- LICENSE                    MIT License
 ```
+
+The GOP display flush and the AbsolutePointer/keyboard indev registration go through
+LVGL's own built-in UEFI backend (`lvgl/src/drivers/uefi/`), enabled via
+`LV_USE_UEFI 1` / `LV_USE_UEFI_INCLUDE "lv_uefi_edk2.h"` in `lv_conf.h`. `LvglLib.c`
+and `lv_port_indev.c` wire it up and add the wheel-scroll and press/hold keyboard
+handling the built-in drivers don't provide on their own.
 
 ## Prerequisites
 
@@ -298,7 +306,7 @@ and string field commits are functional.
 ### Done
 - [x] LvglDisplayEngineDxe -- `EFI_DISPLAY_ENGINE_PROTOCOL` producer
 - [x] `FormDisplay()` IFR -> LVGL widget builder
-- [x] AbsolutePointer / SimplePointer mouse input
+- [x] AbsolutePointer mouse input
 - [x] Mouse wheel
 - [x] Keyboard navigation (UP/DOWN focus, ESC exits, ENTER toggles editing)
 - [x] `EFI_IFR_ORDERED_LIST_OP` renderer with reorder commit
