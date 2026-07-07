@@ -40,7 +40,7 @@ and maps each to an LVGL widget.
 | SUBTITLE           | `lv_label` (styled)  |
 | TEXT               | `lv_label`           |
 | CHECKBOX           | `lv_checkbox`        |
-| NUMERIC            | `lv_spinbox`         |
+| NUMERIC            | `lv_textarea` (digits only) |
 | ONE_OF             | `lv_dropdown`        |
 | STRING             | `lv_textarea`        |
 | PASSWORD           | `lv_textarea` (password mode) |
@@ -54,18 +54,21 @@ and maps each to an LVGL widget.
 LvglPkg/
 +--- Library/LvglLib/           LVGL UEFI port (GOP display, mouse, keyboard)
 |   +--- LvglLib.c              Init/deinit, tick, main loop
+|   +--- LvglScaledDisplay.c    Logical-canvas upscaling for UI scale
 |   +--- lv_uefi_display.c      GOP flush callback
 |   +--- lv_port_indev.c        Mouse (AbsolutePointer) + keyboard input
 |   `--- lvgl/                  Upstream LVGL source (submodule)
++--- Library/LvglUiConfigLib/   NVRAM/PCD UI configuration helpers
 +--- LvglDisplayEngineDxe/      Display engine DXE driver (the main deliverable)
 |   +--- LvglDisplayEngineDxe.c Protocol installation, entry/unload
 |   +--- LvglFormRenderer.c     FormDisplay() -> LVGL widget builder + event loop
 |   +--- LvglFormRenderer.h     Renderer types and API
 |   +--- LvglAptioChrome.c/.h   Aptio-style chrome (header/footer/nav bar)
 |   `--- AptioWallpaper.c       Background image data
-+--- Include/                   Public headers (LvglLib.h, LvglTheme.h)
++--- LvglSetupDxe/              Graphical UI Configuration setup form
++--- Include/                   Public headers (LvglLib.h, LvglTheme.h, ...)
 +--- LvglPkg.dsc                Package build description
-+--- LvglPkg.dec                Package declaration
++--- LvglPkg.dec                Package declaration (PCDs)
 `--- LICENSE                    MIT License
 ```
 
@@ -154,6 +157,64 @@ export PACKAGES_PATH=$HOME/workspace/edk2:$HOME/workspace/edk2/LvglPkg
 ```
 (adjust paths if your checkout is elsewhere).
 
+## Configuration
+
+LvglPkg separates **theme** values (rebuild to change) from **platform defaults**
+(DSC PCDs) and **user settings** (setup form, stored in NVRAM).
+
+### Graphical UI Configuration
+
+`LvglSetupDxe` publishes a **Graphical UI Configuration** form for:
+
+- **UI scale** -- 1x / 1.5x / 2x logical-canvas upscaling (useful on HiDPI panels)
+- **Centered aspect-ratio frame** -- optional letterboxed window instead of
+  edge-to-edge chrome (useful on ultrawide displays)
+
+Settings are stored in the non-volatile `LvglUiScale` variable. A **reboot is
+required** for changes to take effect.
+
+When integrating into a platform firmware image, add the setup driver alongside
+the display engine in the platform DSC and FDF:
+
+```
+LvglPkg/LvglSetupDxe/LvglSetupDxe.inf
+```
+
+The platform DSC also needs the config library mapping:
+
+```
+LvglUiConfigLib|LvglPkg/Library/LvglUiConfigLib/LvglUiConfigLib.inf
+```
+
+### Platform PCDs
+
+Override package defaults in the platform DSC `[PcdsFixedAtBuild]` section.
+Declared in `LvglPkg.dec`:
+
+| PCD | Purpose |
+|-----|---------|
+| `PcdLvglHelpPaneWidthPct` | Help pane width (% of content row) |
+| `PcdLvglAptioHeaderTitle` | Header bar title (left) |
+| `PcdLvglAptioHeaderVendor` | Header bar vendor string (center) |
+| `PcdLvglCenteredFrameEnabled` | Enable centered frame by default |
+| `PcdLvglCenteredFrameHeightPct` | Frame height (% of display height) |
+| `PcdLvglCenteredFrameAspectNum` / `Den` | Frame aspect ratio (e.g. 16:9) |
+
+Example:
+
+```ini
+[PcdsFixedAtBuild]
+  gLvglPkgTokenSpaceGuid.PcdLvglAptioHeaderTitle|"My Firmware Setup"
+  gLvglPkgTokenSpaceGuid.PcdLvglCenteredFrameEnabled|TRUE
+```
+
+### Theme (`Include/LvglTheme.h`)
+
+Colors, fonts, padding, and widget styling used by the renderer. Edit and
+rebuild to restyle the UI. Chrome **strings**, help-pane **width**, and
+centered-frame **defaults** are controlled by PCDs and/or the setup form
+instead.
+
 ## Build
 
 ### Standalone -- verify the package compiles
@@ -219,7 +280,7 @@ through LVGL. Exit QEMU with `Ctrl+A` then `X` (when `-serial stdio` is used).
 
 ## Screenshots
 
-**Boot Maintenance Manager** -- mixed widgets (list, dropdown, numeric spinbox)
+**Boot Maintenance Manager** -- mixed widgets (list, dropdown, numeric field)
 with F9/F10 hotkeys in the footer:
 
 ![Boot Maintenance Manager](./docs/images/boot-maintenance.png)
@@ -242,9 +303,18 @@ and string field commits are functional.
 - [x] Keyboard navigation (UP/DOWN focus, ESC exits, ENTER toggles editing)
 - [x] `EFI_IFR_ORDERED_LIST_OP` renderer with reorder commit
 - [x] String field value commit (`HiiSetString` + pool buffer)
-- [x] Aptio-style chrome (header/footer/nav)
+- [x] Aptio-style chrome (header/footer/nav/help pane)
 - [x] Function-key hotkeys (F9 Load Defaults, F10 Save, driver-registered hotkeys)
 - [x] Theme/styling pass (fonts, colors, readability)
+- [x] Software UI scaling (1x / 1.5x / 2x) via logical-canvas upscaling
+- [x] Graphical UI Configuration setup form (`LvglSetupDxe`)
+- [x] Opt-in centered aspect-ratio frame with letterbox backdrop
+- [x] Platform PCDs for chrome strings and layout defaults
+- [x] Front-page banner label refresh from HII
+- [x] Device model shown in the subtitle bar
+- [x] HII confirm/popup dialogs (`EFI_HII_POPUP_PROTOCOL`)
+- [x] On-screen keyboard (shown for text entry when a pointer is present)
+- [x] `grayoutif` / disabled control rendering
 
 ### TODO
 - [ ] VS2022 / AARCH64-GCC / Clang toolchain support
