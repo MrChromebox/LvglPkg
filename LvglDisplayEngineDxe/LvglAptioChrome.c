@@ -134,13 +134,13 @@ BuildHeader (
   // Center: vendor / version (dimmed)
   Vendor = lv_label_create (Bar);
   lv_label_set_text (Vendor, (CONST CHAR8 *)PcdGetPtr (PcdLvglAptioHeaderVendor));
-  lv_obj_set_style_text_font (Vendor, THEME_FONT_BODY, 0);
+  THEME_APPLY_BODY_FONT (Vendor);
   lv_obj_set_style_text_color (Vendor, lv_color_hex (THEME_COLOR_HEADER_DIM), 0);
   lv_obj_align (Vendor, LV_ALIGN_CENTER, 0, 0);
 
   // Right: clock
   mClockLabel = lv_label_create (Bar);
-  lv_obj_set_style_text_font (mClockLabel, THEME_FONT_BODY, 0);
+  THEME_APPLY_BODY_FONT (mClockLabel);
   lv_obj_set_style_text_color (mClockLabel, lv_color_hex (THEME_COLOR_HEADER_TEXT), 0);
   lv_obj_align (mClockLabel, LV_ALIGN_RIGHT_MID, 0, 0);
   lv_label_set_text (mClockLabel, "");
@@ -189,7 +189,7 @@ BuildSubtitleBar (
 
   Label = lv_label_create (Bar);
   lv_label_set_text (Label, Utf8 != NULL ? Utf8 : "Setup");
-  lv_obj_set_style_text_font (Label, THEME_FONT_BODY, 0);
+  THEME_APPLY_BODY_FONT (Label);
   lv_obj_set_style_text_color (Label, lv_color_hex (THEME_COLOR_SUBTITLE_TEXT), 0);
   lv_obj_align (Label, LV_ALIGN_LEFT_MID, 0, 0);
 
@@ -229,12 +229,12 @@ AddHotKeyChip (
 
   KeyLbl = lv_label_create (Chip);
   lv_label_set_text (KeyLbl, KeyText);
-  lv_obj_set_style_text_font (KeyLbl, THEME_FONT_BODY, 0);
+  THEME_APPLY_BODY_FONT (KeyLbl);
   lv_obj_set_style_text_color (KeyLbl, lv_color_hex (THEME_COLOR_ACCENT_HOVER), 0);
 
   DescLbl = lv_label_create (Chip);
   lv_label_set_text (DescLbl, LabelText);
-  lv_obj_set_style_text_font (DescLbl, THEME_FONT_BODY, 0);
+  THEME_APPLY_BODY_FONT (DescLbl);
   lv_obj_set_style_text_color (DescLbl, lv_color_hex (THEME_COLOR_FOOTER_TEXT), 0);
 }
 
@@ -307,7 +307,7 @@ BuildFooter (
 
     Notice = lv_label_create (Bar);
     lv_label_set_text (Notice, LV_SYMBOL_WARNING "  Unsaved changes -- press F10 to save");
-    lv_obj_set_style_text_font (Notice, THEME_FONT_BODY, 0);
+    THEME_APPLY_BODY_FONT (Notice);
     lv_obj_set_style_text_color (Notice, lv_color_hex (THEME_COLOR_WARNING), 0);
     lv_obj_set_style_pad_right (Notice, THEME_PAD_FOOTER_X, 0);
   }
@@ -469,6 +469,7 @@ AptioBuildChrome (
     lv_obj_add_flag (Content, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag (Content, LV_OBJ_FLAG_SCROLL_ELASTIC);
     lv_obj_clear_flag (Content, LV_OBJ_FLAG_SCROLL_MOMENTUM);
+    LvglThemeApplyBodyFont (Content);
 
     // Right: help pane (percentage width). Header label "Help" + body label.
     HelpPane = lv_obj_create (Middle);
@@ -489,13 +490,13 @@ AptioBuildChrome (
 
     HelpHeader = lv_label_create (HelpPane);
     lv_label_set_text (HelpHeader, "Help");
-    lv_obj_set_style_text_font (HelpHeader, THEME_FONT_BODY, 0);
+    THEME_APPLY_BODY_FONT (HelpHeader);
     lv_obj_set_style_text_color (HelpHeader, lv_color_hex (THEME_COLOR_TEXT_SECONDARY), 0);
 
     mHelpLabel = lv_label_create (HelpPane);
     lv_label_set_long_mode (mHelpLabel, LV_LABEL_LONG_WRAP);
     lv_obj_set_width (mHelpLabel, LV_PCT (100));
-    lv_obj_set_style_text_font (mHelpLabel, THEME_FONT_BODY, 0);
+    THEME_APPLY_BODY_FONT (mHelpLabel);
     lv_obj_set_style_text_color (mHelpLabel, lv_color_hex (THEME_COLOR_TEXT_PRIMARY), 0);
     lv_label_set_text (mHelpLabel, "");
   }

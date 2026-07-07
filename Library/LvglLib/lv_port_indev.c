@@ -46,6 +46,7 @@
  *      INCLUDES
  *********************/
 #include "lv_port_indev.h"
+#include <Library/LvglThemeLib.h>
 
 // Required for lv_uefi_keypad_drain() to poke private keypad state
 #include "lvgl/src/indev/lv_indev_private.h"
@@ -418,6 +419,7 @@ void lv_port_indev_init (lv_display_t *disp)
     LV_IMG_DECLARE(mouse_cursor_icon);
     lv_obj_t *cursor_obj = lv_image_create (lv_screen_active ());
     lv_image_set_src (cursor_obj, &mouse_cursor_icon);
+    LvglThemeStyleCursor (cursor_obj);
     lv_indev_set_cursor (indev_mouse, cursor_obj);
 
     //

@@ -25,9 +25,9 @@
 
 //
 // UI scale factors. Values are stored as-is in the variable's UiScale field.
-//   1x   : native resolution, no scaling (default, zero overhead)
-//   1.5x : logical canvas = physical / 1.5, upscaled on flush
-//   2x   : logical canvas = physical / 2,   upscaled on flush
+//   1x   : native resolution, base theme metrics (default)
+//   1.5x : larger fonts and layout via LvglThemeLib (3/2)
+//   2x   : larger fonts and layout via LvglThemeLib (2/1)
 //
 #define LVGL_UI_SCALE_1X       0
 #define LVGL_UI_SCALE_1_5X     1
