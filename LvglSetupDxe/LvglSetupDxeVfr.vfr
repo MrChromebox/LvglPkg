@@ -2,10 +2,9 @@
 //
 // LVGL UI configuration formset.
 //
-// Presents the software UI-scale control. The selection is stored in the
-// non-volatile LvglUiScale variable and consumed by LvglLib when it creates
-// the LVGL display. A reboot is required for a change to take effect because
-// the display is created once per boot, before any form is rendered.
+// Presents graphical UI settings stored in the non-volatile LvglUiScale
+// variable. Platform PCDs supply the defaults on first boot. A reboot is
+// required for changes to take effect.
 //
 // Copyright (c) 2026, MrChromebox. All rights reserved.<BR>
 // SPDX-License-Identifier: BSD-2-Clause-Patent
@@ -30,6 +29,8 @@ formset
   form formid = 1,
     title = STRING_TOKEN(STR_FORM_SET_TITLE);
 
+    subtitle text = STRING_TOKEN(STR_UI_SCALE_SECTION);
+
     oneof varid = LvglUiScale.UiScale,
       prompt = STRING_TOKEN(STR_UI_SCALE_PROMPT),
       help   = STRING_TOKEN(STR_UI_SCALE_HELP),
@@ -38,6 +39,45 @@ formset
       option text = STRING_TOKEN(STR_UI_SCALE_1_5X), value = 1, flags = 0;
       option text = STRING_TOKEN(STR_UI_SCALE_2X),   value = 2, flags = 0;
     endoneof;
+
+    subtitle text = STRING_TOKEN(STR_CENTERED_FRAME_SECTION);
+
+    checkbox varid = LvglUiScale.CenteredFrameEnabled,
+      prompt = STRING_TOKEN(STR_CENTERED_FRAME_PROMPT),
+      help   = STRING_TOKEN(STR_CENTERED_FRAME_HELP),
+      flags  = RESET_REQUIRED,
+    endcheckbox;
+
+    grayoutif ideqval LvglUiScale.CenteredFrameEnabled == 0;
+
+    numeric varid = LvglUiScale.CenteredFrameHeightPct,
+      prompt = STRING_TOKEN(STR_CENTERED_FRAME_HEIGHT_PROMPT),
+      help   = STRING_TOKEN(STR_CENTERED_FRAME_HEIGHT_HELP),
+      flags  = NUMERIC_SIZE_1 | RESET_REQUIRED,
+      minimum = 1,
+      maximum = 100,
+      step    = 0,
+    endnumeric;
+
+    numeric varid = LvglUiScale.CenteredFrameAspectNum,
+      prompt = STRING_TOKEN(STR_CENTERED_FRAME_ASPECT_NUM_PROMPT),
+      help   = STRING_TOKEN(STR_CENTERED_FRAME_ASPECT_NUM_HELP),
+      flags  = NUMERIC_SIZE_1 | RESET_REQUIRED,
+      minimum = 1,
+      maximum = 255,
+      step    = 0,
+    endnumeric;
+
+    numeric varid = LvglUiScale.CenteredFrameAspectDen,
+      prompt = STRING_TOKEN(STR_CENTERED_FRAME_ASPECT_DEN_PROMPT),
+      help   = STRING_TOKEN(STR_CENTERED_FRAME_ASPECT_DEN_HELP),
+      flags  = NUMERIC_SIZE_1 | RESET_REQUIRED,
+      minimum = 1,
+      maximum = 255,
+      step    = 0,
+    endnumeric;
+
+    endif;
 
   endform;
 

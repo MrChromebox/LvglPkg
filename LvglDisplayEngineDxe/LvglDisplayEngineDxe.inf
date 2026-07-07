@@ -42,10 +42,12 @@
   MemoryAllocationLib
   HiiLib
   PcdLib
+  LvglUiConfigLib
   LvglLib
 
 [Guids]
   gEfiIfrTianoGuid                      ## CONSUMES ## GUID (Identify front-page banner opcodes)
+  gLvglUiConfigFormSetGuid              ## CONSUMES
 
 [Protocols]
   gEdkiiFormDisplayEngineProtocolGuid   ## PRODUCES

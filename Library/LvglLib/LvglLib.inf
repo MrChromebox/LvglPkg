@@ -511,15 +511,12 @@
 [LibraryClasses]
   UefiLib
   UefiBootServicesTableLib
-  UefiRuntimeServicesTableLib
   MemoryAllocationLib
   BaseMemoryLib
   DebugLib
   PrintLib
   BaseLib
-
-[Guids]
-  gLvglUiConfigFormSetGuid              ## CONSUMES
+  LvglUiConfigLib
 
 [Protocols]
   gEfiGraphicsOutputProtocolGuid
