@@ -1,10 +1,10 @@
 /** @file
   Setup driver that publishes the LVGL UI configuration form.
 
-  Presents the software UI-scale control (1x / 1.5x / 2x) and seeds the
-  backing non-volatile variable with platform PCD defaults on first boot.
-  The form uses an efivarstore, so the setup browser reads and writes the
-  variable directly; no ConfigAccess protocol is required.
+  Presents graphical UI settings (software UI scale and centered-frame layout)
+  and seeds the backing non-volatile variable with platform PCD defaults on
+  first boot. The form uses an efivarstore, so the setup browser reads and
+  writes the variable directly; no ConfigAccess protocol is required.
 
   Copyright (c) 2026, MrChromebox. All rights reserved.<BR>
   SPDX-License-Identifier: BSD-2-Clause-Patent
