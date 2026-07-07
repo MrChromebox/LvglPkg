@@ -1,10 +1,8 @@
 /** @file
-  Shared definitions for the LVGL UI configuration (software UI scaling).
-
-  The scale value is persisted in a non-volatile UEFI variable so the LVGL
-  display engine can size its logical canvas before the first form is rendered.
-  A dedicated setup driver (LvglSetupDxe) presents the control; the LVGL library
-  (LvglLib) consumes the value when it creates the display.
+  Shared definitions for the LVGL UI configuration (software UI scaling and
+  chrome layout). The values are persisted in a non-volatile UEFI variable so
+  the LVGL library and display engine can read them at boot. LvglSetupDxe
+  publishes the setup form; platform PCDs supply the defaults on first boot.
 
   Copyright (c) 2026, MrChromebox. All rights reserved.<BR>
   SPDX-License-Identifier: BSD-2-Clause-Patent
@@ -20,7 +18,7 @@
   { 0xddb969f2, 0xe99b, 0x4dd5, { 0x8e, 0x36, 0xb8, 0x0b, 0x52, 0x6d, 0x3b, 0x73 } }
 
 //
-// Non-volatile variable that stores the UI scale selection. Both the setup
+// Non-volatile variable that stores the UI configuration. Both the setup
 // driver's efivarstore and the LVGL library reference this exact name/GUID.
 //
 #define LVGL_UI_CONFIG_VAR_NAME  L"LvglUiScale"
@@ -39,6 +37,10 @@
 #pragma pack(1)
 typedef struct {
   UINT8    UiScale;
+  UINT8    CenteredFrameEnabled;
+  UINT8    CenteredFrameHeightPct;
+  UINT8    CenteredFrameAspectNum;
+  UINT8    CenteredFrameAspectDen;
 } LVGL_UI_CONFIG_VARSTORE_DATA;
 #pragma pack()
 

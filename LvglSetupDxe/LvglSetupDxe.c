@@ -2,10 +2,9 @@
   Setup driver that publishes the LVGL UI configuration form.
 
   Presents the software UI-scale control (1x / 1.5x / 2x) and seeds the
-  backing non-volatile variable with its default on first boot so the LVGL
-  library always finds a valid value. The form uses an efivarstore, so the
-  setup browser reads and writes the variable directly; no ConfigAccess
-  protocol is required.
+  backing non-volatile variable with platform PCD defaults on first boot.
+  The form uses an efivarstore, so the setup browser reads and writes the
+  variable directly; no ConfigAccess protocol is required.
 
   Copyright (c) 2026, MrChromebox. All rights reserved.<BR>
   SPDX-License-Identifier: BSD-2-Clause-Patent
@@ -15,8 +14,8 @@
 #include <Library/DebugLib.h>
 #include <Library/DevicePathLib.h>
 #include <Library/HiiLib.h>
+#include <Library/LvglUiConfigLib.h>
 #include <Library/UefiBootServicesTableLib.h>
-#include <Library/UefiRuntimeServicesTableLib.h>
 
 #include <Guid/LvglUiConfig.h>
 
@@ -49,42 +48,6 @@ STATIC HII_VENDOR_DEVICE_PATH  mVendorDevicePath = {
     }
   }
 };
-
-/**
-  Seed the UI configuration variable with its default value if it is absent.
-**/
-STATIC
-VOID
-EnsureDefaultVariable (
-  VOID
-  )
-{
-  EFI_STATUS                    Status;
-  LVGL_UI_CONFIG_VARSTORE_DATA  Config;
-  UINTN                         Size;
-
-  Size   = sizeof (Config);
-  Status = gRT->GetVariable (
-                  LVGL_UI_CONFIG_VAR_NAME,
-                  &gLvglUiConfigFormSetGuid,
-                  NULL,
-                  &Size,
-                  &Config
-                  );
-  if (!EFI_ERROR (Status) && (Size == sizeof (Config))) {
-    return;
-  }
-
-  Config.UiScale = LVGL_UI_SCALE_DEFAULT;
-  Status         = gRT->SetVariable (
-                          LVGL_UI_CONFIG_VAR_NAME,
-                          &gLvglUiConfigFormSetGuid,
-                          EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS,
-                          sizeof (Config),
-                          &Config
-                          );
-  DEBUG ((DEBUG_INFO, "LvglSetupDxe: seeded %s = %u (%r)\n", LVGL_UI_CONFIG_VAR_NAME, Config.UiScale, Status));
-}
 
 /**
   Install the HII form package and its vendor device path.
@@ -147,6 +110,6 @@ LvglSetupInitialize (
   IN EFI_SYSTEM_TABLE  *SystemTable
   )
 {
-  EnsureDefaultVariable ();
+  LvglUiConfigEnsureVariable ();
   return InstallHiiPages ();
 }

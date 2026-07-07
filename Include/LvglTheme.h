@@ -146,6 +146,18 @@
 //
 #define THEME_DIALOG_WIDTH_PCT       50
 
+
+//
+// Content frame sizing (Graphical UI Configuration setup page / PCD defaults):
+//   CenteredFrameEnabled    -- center UI in an aspect-ratio window
+//   CenteredFrameHeightPct  -- frame height (% of display height)
+//   CenteredFrameAspectNum, CenteredFrameAspectDen -- frame width = height * Num / Den
+//
+// Backdrop shown behind the centered content frame (the letterbox bars).
+// Only used when PcdLvglCenteredFrameEnabled is TRUE.
+//
+#define THEME_COLOR_BACKDROP         0x05080B
+
 //
 // Aptio-style chrome strings and layout overrides (platform DSC / PCD):
 //   PcdLvglAptioHeaderTitle      -- header bar title (left)

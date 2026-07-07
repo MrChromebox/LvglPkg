@@ -9,6 +9,7 @@
 #include <LvglTheme.h>
 #include <Library/BaseLib.h>
 #include <Library/DebugLib.h>
+#include <Library/LvglUiConfigLib.h>
 #include <Library/PcdLib.h>
 #include <Library/UefiRuntimeServicesTableLib.h>
 #include <Library/HiiLib.h>
@@ -350,27 +351,88 @@ AptioBuildChrome (
   IN FORM_DISPLAY_ENGINE_FORM    *FormData
   )
 {
-  lv_obj_t  *Content;
+  lv_obj_t                       *Content;
+  lv_obj_t                       *ChromeRoot;
+  lv_obj_t                       *Frame;
+  LVGL_UI_CONFIG_VARSTORE_DATA   UiConfig;
+  int32_t                        HorRes;
+  int32_t                        VerRes;
+  int32_t                        FrameW;
+  int32_t                        FrameH;
 
-  // Screen is a vertical flex column with an Aptio-style gradient
-  // background (dark navy top -> mid navy bottom). The compiled-in
-  // RGB565 wallpaper image is bypassed -- LVGL's decoder doesn't render
-  // it cleanly with LV_COLOR_DEPTH=32 and the asset is also smaller
-  // than a typical GOP framebuffer (800x600 vs 1280x800), so it
-  // wouldn't tile/scale correctly anyway.
-  lv_obj_remove_style_all (Screen);
-  lv_obj_set_style_bg_color (Screen, lv_color_hex (THEME_COLOR_BG_SCREEN), 0);
-  lv_obj_set_style_bg_grad_color (Screen, lv_color_hex (THEME_COLOR_BG_SCREEN), 0);
-  lv_obj_set_style_bg_grad_dir (Screen, LV_GRAD_DIR_VER, 0);
-  lv_obj_set_style_bg_opa (Screen, LV_OPA_COVER, 0);
-  lv_obj_set_flex_flow (Screen, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_style_pad_all (Screen, 0, 0);
-  lv_obj_set_style_pad_row (Screen, 0, 0);
-  lv_obj_clear_flag (Screen, LV_OBJ_FLAG_SCROLLABLE);
+  ChromeRoot = Screen;
+  LvglUiConfigLoad (&UiConfig);
+
+  if (UiConfig.CenteredFrameEnabled != 0) {
+    //
+    // Screen is the full-display backdrop. The UI itself lives in a centered
+    // "Frame" sized from the Graphical UI Configuration settings (PCD defaults
+    // on first boot).
+    //
+    lv_obj_remove_style_all (Screen);
+    lv_obj_set_style_bg_color (Screen, lv_color_hex (THEME_COLOR_BACKDROP), 0);
+    lv_obj_set_style_bg_opa (Screen, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_all (Screen, 0, 0);
+    lv_obj_clear_flag (Screen, LV_OBJ_FLAG_SCROLLABLE);
+
+    HorRes = LV_HOR_RES;
+    VerRes = LV_VER_RES;
+    FrameH = (VerRes * UiConfig.CenteredFrameHeightPct) / 100;
+    if ((FrameH <= 0) || (FrameH > VerRes)) {
+      FrameH = VerRes;
+    }
+
+    FrameW = (FrameH * UiConfig.CenteredFrameAspectNum) / UiConfig.CenteredFrameAspectDen;
+    if ((FrameW <= 0) || (FrameW > HorRes)) {
+      FrameW = HorRes;
+    }
+
+    //
+    // Frame is a vertical flex column with an Aptio-style gradient background
+    // (dark navy top -> mid navy bottom). The compiled-in RGB565 wallpaper
+    // image is bypassed -- LVGL's decoder doesn't render it cleanly with
+    // LV_COLOR_DEPTH=32 and the asset is also smaller than a typical GOP
+    // framebuffer (800x600 vs 1280x800), so it wouldn't tile/scale correctly.
+    //
+    Frame = lv_obj_create (Screen);
+    lv_obj_remove_style_all (Frame);
+    lv_obj_set_size (Frame, FrameW, FrameH);
+    lv_obj_center (Frame);
+    lv_obj_set_style_bg_color (Frame, lv_color_hex (THEME_COLOR_BG_SCREEN), 0);
+    lv_obj_set_style_bg_grad_color (Frame, lv_color_hex (THEME_COLOR_BG_SCREEN), 0);
+    lv_obj_set_style_bg_grad_dir (Frame, LV_GRAD_DIR_VER, 0);
+    lv_obj_set_style_bg_opa (Frame, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color (Frame, lv_color_hex (THEME_COLOR_BG_SEPARATOR), 0);
+    lv_obj_set_style_border_width (Frame, THEME_BORDER_PANE, 0);
+    lv_obj_set_flex_flow (Frame, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all (Frame, 0, 0);
+    lv_obj_set_style_pad_row (Frame, 0, 0);
+    lv_obj_clear_flag (Frame, LV_OBJ_FLAG_SCROLLABLE);
+
+    ChromeRoot = Frame;
+  } else {
+    //
+    // Screen is a vertical flex column with an Aptio-style gradient
+    // background (dark navy top -> mid navy bottom). The compiled-in
+    // RGB565 wallpaper image is bypassed -- LVGL's decoder doesn't render
+    // it cleanly with LV_COLOR_DEPTH=32 and the asset is also smaller
+    // than a typical GOP framebuffer (800x600 vs 1280x800), so it
+    // wouldn't tile/scale correctly anyway.
+    //
+    lv_obj_remove_style_all (Screen);
+    lv_obj_set_style_bg_color (Screen, lv_color_hex (THEME_COLOR_BG_SCREEN), 0);
+    lv_obj_set_style_bg_grad_color (Screen, lv_color_hex (THEME_COLOR_BG_SCREEN), 0);
+    lv_obj_set_style_bg_grad_dir (Screen, LV_GRAD_DIR_VER, 0);
+    lv_obj_set_style_bg_opa (Screen, LV_OPA_COVER, 0);
+    lv_obj_set_flex_flow (Screen, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all (Screen, 0, 0);
+    lv_obj_set_style_pad_row (Screen, 0, 0);
+    lv_obj_clear_flag (Screen, LV_OBJ_FLAG_SCROLLABLE);
+  }
 
   // Header / subtitle / [content row | help pane] / footer in flex order.
-  BuildHeader (Screen);
-  BuildSubtitleBar (Screen, FormData);
+  BuildHeader (ChromeRoot);
+  BuildSubtitleBar (ChromeRoot, FormData);
 
   //
   // Middle band: horizontal flex with rows panel on the left and help pane
@@ -382,7 +444,7 @@ AptioBuildChrome (
     lv_obj_t  *HelpPane;
     lv_obj_t  *HelpHeader;
 
-    Middle = lv_obj_create (Screen);
+    Middle = lv_obj_create (ChromeRoot);
     lv_obj_remove_style_all (Middle);
     lv_obj_set_width (Middle, LV_PCT (100));
     lv_obj_set_flex_grow (Middle, 1);
@@ -438,7 +500,7 @@ AptioBuildChrome (
     lv_label_set_text (mHelpLabel, "");
   }
 
-  BuildFooter (Screen, FormData);
+  BuildFooter (ChromeRoot, FormData);
 
   return Content;
 }

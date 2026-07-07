@@ -2,8 +2,7 @@
 #include "LvglLibCommon.h"
 
 #include <Library/LvglLib.h>
-#include <Library/UefiRuntimeServicesTableLib.h>
-#include <Guid/LvglUiConfig.h>
+#include <Library/LvglUiConfigLib.h>
 
 extern UINT8  mExitBtnYes;
 
@@ -21,26 +20,9 @@ LvglGetUiScale (
   VOID
   )
 {
-  EFI_STATUS                    Status;
   LVGL_UI_CONFIG_VARSTORE_DATA  Config;
-  UINTN                         Size;
 
-  Size   = sizeof (Config);
-  Status = gRT->GetVariable (
-                  LVGL_UI_CONFIG_VAR_NAME,
-                  &gLvglUiConfigFormSetGuid,
-                  NULL,
-                  &Size,
-                  &Config
-                  );
-  if (EFI_ERROR (Status) || (Size != sizeof (Config))) {
-    return LVGL_UI_SCALE_DEFAULT;
-  }
-
-  if ((Config.UiScale != LVGL_UI_SCALE_1_5X) && (Config.UiScale != LVGL_UI_SCALE_2X)) {
-    return LVGL_UI_SCALE_1X;
-  }
-
+  LvglUiConfigLoad (&Config);
   return Config.UiScale;
 }
 
