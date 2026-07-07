@@ -52,11 +52,13 @@ and maps each to an LVGL widget.
 
 ```
 LvglPkg/
-+--- Library/LvglLib/           LVGL UEFI port (GOP display, mouse, keyboard)
++--- Library/LvglLib/           LVGL UEFI port (display, mouse, keyboard)
 |   +--- LvglLib.c              Init/deinit, tick, main loop
 |   +--- LvglScaledDisplay.c    Logical-canvas upscaling for UI scale
-|   +--- lv_uefi_display.c      GOP flush callback
+|   +--- LvglUefiPort.c/.h      libc shim (malloc/string/etc.) for the LVGL build
 |   +--- lv_port_indev.c        Mouse (AbsolutePointer) + keyboard input
+|   +--- MouseCursorIcon.c      Mouse cursor bitmap used by lv_port_indev.c
+|   +--- EscExitHandler.c       ESC-to-exit confirmation popup handling
 |   `--- lvgl/                  Upstream LVGL source (submodule)
 +--- Library/LvglUiConfigLib/   NVRAM/PCD UI configuration helpers
 +--- LvglDisplayEngineDxe/      Display engine DXE driver (the main deliverable)
@@ -71,6 +73,12 @@ LvglPkg/
 +--- LvglPkg.dec                Package declaration (PCDs)
 `--- LICENSE                    MIT License
 ```
+
+The GOP display flush and the AbsolutePointer/keyboard indev registration go through
+LVGL's own built-in UEFI backend (`lvgl/src/drivers/uefi/`), enabled via
+`LV_USE_UEFI 1` / `LV_USE_UEFI_INCLUDE "lv_uefi_edk2.h"` in `lv_conf.h`. `LvglLib.c`
+and `lv_port_indev.c` wire it up and add the wheel-scroll and press/hold keyboard
+handling the built-in drivers don't provide on their own.
 
 ## Prerequisites
 
@@ -93,7 +101,7 @@ LvglPkg/
 
 ## Integration
 
-Replacing the stock display engine in OVMF takes three coordinated edits.
+Replacing the stock display engine in OVMF takes several coordinated edits.
 
 ### 1. DSC -- replace the display engine module
 
@@ -116,7 +124,29 @@ INF  MdeModulePkg/Universal/DisplayEngineDxe/DisplayEngineDxe.inf
 INF  LvglPkg/LvglDisplayEngineDxe/LvglDisplayEngineDxe.inf
 ```
 
-### 3. USB mouse -- switch to the AbsolutePointer driver
+### 3. Setup DXE + config library -- Graphical UI Configuration form
+
+`LvglSetupDxe` publishes the **Graphical UI Configuration** form (UI scale,
+centered aspect-ratio frame -- see [Configuration](#configuration) below) and
+is part of the standard integration alongside the display engine.
+
+In `OvmfPkg/OvmfPkgX64.dsc`, add the driver to `[Components]` next to
+`LvglDisplayEngineDxe.inf`:
+```
+LvglPkg/LvglSetupDxe/LvglSetupDxe.inf
+```
+and map its config library in `[LibraryClasses]`:
+```
+LvglUiConfigLib|LvglPkg/Library/LvglUiConfigLib/LvglUiConfigLib.inf
+```
+
+In `OvmfPkg/OvmfPkgX64.fdf`, add the driver to the DXE FV section next to
+`LvglDisplayEngineDxe.inf`:
+```
+INF  LvglPkg/LvglSetupDxe/LvglSetupDxe.inf
+```
+
+### 4. USB mouse -- switch to the AbsolutePointer driver
 
 LVGL needs `EFI_ABSOLUTE_POINTER_PROTOCOL`. EDK2 ships two USB mouse drivers,
 and they cannot coexist -- `UsbMouseDxe` advertises a higher driver-binding
@@ -147,9 +177,9 @@ QEMU must use `-device usb-mouse` (Boot/Mouse class), **not** `-device usb-table
 > `LvglDisplayEngineDxe` reliably takes over because it dispatches after the
 > stock module. The same shortcut applies to the mouse driver: leaving
 > `UsbMouseDxe` in place will block AbsolutePointer (driver-binding `Version`
-> sort), so for mouse input the swap in step 3 is **not** optional.
+> sort), so for mouse input the swap in step 4 is **not** optional.
 
-### 4. PACKAGES_PATH
+### 5. PACKAGES_PATH
 
 Tell the EDK2 build where LvglPkg lives:
 ```bash
@@ -173,18 +203,9 @@ LvglPkg separates **theme** values (rebuild to change) from **platform defaults*
 Settings are stored in the non-volatile `LvglUiScale` variable. A **reboot is
 required** for changes to take effect.
 
-When integrating into a platform firmware image, add the setup driver alongside
-the display engine in the platform DSC and FDF:
-
-```
-LvglPkg/LvglSetupDxe/LvglSetupDxe.inf
-```
-
-The platform DSC also needs the config library mapping:
-
-```
-LvglUiConfigLib|LvglPkg/Library/LvglUiConfigLib/LvglUiConfigLib.inf
-```
+Wiring `LvglSetupDxe` and `LvglUiConfigLib` into a platform DSC/FDF is part of
+the standard integration -- see [step 3](#3-setup-dxe--config-library----graphical-ui-configuration-form)
+above.
 
 ### Platform PCDs
 
@@ -298,7 +319,7 @@ and string field commits are functional.
 ### Done
 - [x] LvglDisplayEngineDxe -- `EFI_DISPLAY_ENGINE_PROTOCOL` producer
 - [x] `FormDisplay()` IFR -> LVGL widget builder
-- [x] AbsolutePointer / SimplePointer mouse input
+- [x] AbsolutePointer mouse input
 - [x] Mouse wheel
 - [x] Keyboard navigation (UP/DOWN focus, ESC exits, ENTER toggles editing)
 - [x] `EFI_IFR_ORDERED_LIST_OP` renderer with reorder commit
