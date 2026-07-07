@@ -1209,47 +1209,64 @@ ClampU64 (
   return Value;
 }
 
-/**
-  Numeric textarea commit -- fires when the user presses ENTER on a one_line
-  textarea (LV_EVENT_READY). Parses the typed text, clamps to the IFR
-  Min/Max range, and delivers the new value to the browser.
-**/
 STATIC
-VOID
-OnNumericReady (
-  lv_event_t  *Event
+UINT64
+GetStatementNumericValue (
+  IN FORM_DISPLAY_ENGINE_STATEMENT  *Statement,
+  IN EFI_IFR_NUMERIC                *NumOp
   )
 {
-  LVGL_STATEMENT_CONTEXT  *Ctx;
-  lv_obj_t                *Ta;
-  CONST CHAR8             *Text;
-  UINT64                  Value;
-  UINT64                  MinVal;
-  UINT64                  MaxVal;
-  EFI_IFR_NUMERIC         *NumOp;
+  switch (NumOp->Flags & EFI_IFR_NUMERIC_SIZE) {
+    case EFI_IFR_NUMERIC_SIZE_1:
+      return Statement->CurrentValue.Value.u8;
+    case EFI_IFR_NUMERIC_SIZE_2:
+      return Statement->CurrentValue.Value.u16;
+    case EFI_IFR_NUMERIC_SIZE_4:
+      return Statement->CurrentValue.Value.u32;
+    default:
+      return Statement->CurrentValue.Value.u64;
+  }
+}
 
-  Ctx = (LVGL_STATEMENT_CONTEXT *)lv_event_get_user_data (Event);
-  if ((Ctx == NULL) || (mSession.UserInput == NULL)) {
-    return;
+/**
+  Parse, clamp, and deliver a numeric textarea value to the browser.
+
+  @retval TRUE   Value was committed and the event loop should exit.
+  @retval FALSE  No commit (unchanged on defocus, or invalid context).
+**/
+STATIC
+BOOLEAN
+CommitNumericValue (
+  IN LVGL_STATEMENT_CONTEXT  *Ctx,
+  IN lv_obj_t                *Ta,
+  IN BOOLEAN                 ForceCommit
+  )
+{
+  CONST CHAR8  *Text;
+  UINT64       Value;
+  UINT64       CurVal;
+  UINT64       MinVal;
+  UINT64       MaxVal;
+  EFI_IFR_NUMERIC  *NumOp;
+
+  if ((Ctx == NULL) || (mSession.UserInput == NULL) || mSession.ExitRequested) {
+    return FALSE;
   }
 
   if (!IsStatementInCurrentForm (Ctx->Statement)) {
-    return;
+    return FALSE;
   }
 
-  Ta    = lv_event_get_target_obj (Event);
   Text  = lv_textarea_get_text (Ta);
   Value = AsciiDecimalToUint64 (Text);
 
   NumOp = (EFI_IFR_NUMERIC *)Ctx->Statement->OpCode;
   GetNumericRange (NumOp, &MinVal, &MaxVal);
+  Value = ClampU64 (Value, MinVal, MaxVal);
 
-  if (Value < MinVal) {
-    Value = MinVal;
-  }
-
-  if (Value > MaxVal) {
-    Value = MaxVal;
+  CurVal = GetStatementNumericValue (Ctx->Statement, NumOp);
+  if (!ForceCommit && (Value == CurVal)) {
+    return FALSE;
   }
 
   mSession.UserInput->SelectedStatement = Ctx->Statement;
@@ -1272,6 +1289,44 @@ OnNumericReady (
 
   mSession.UserInput->Action = 0;
   mSession.ExitRequested     = TRUE;
+  return TRUE;
+}
+
+/**
+  Numeric textarea commit -- fires when the user presses ENTER on a one_line
+  textarea (LV_EVENT_READY). Parses the typed text, clamps to the IFR
+  Min/Max range, and delivers the new value to the browser.
+**/
+STATIC
+VOID
+OnNumericReady (
+  lv_event_t  *Event
+  )
+{
+  LVGL_STATEMENT_CONTEXT  *Ctx;
+  lv_obj_t                *Ta;
+
+  Ctx = (LVGL_STATEMENT_CONTEXT *)lv_event_get_user_data (Event);
+  Ta  = lv_event_get_target_obj (Event);
+  (VOID)CommitNumericValue (Ctx, Ta, TRUE);
+}
+
+/**
+  Commit a numeric textarea when focus leaves the field so arrow-key / mouse
+  navigation picks up edits without requiring Enter on each value.
+**/
+STATIC
+VOID
+OnNumericDefocused (
+  lv_event_t  *Event
+  )
+{
+  LVGL_STATEMENT_CONTEXT  *Ctx;
+  lv_obj_t                *Ta;
+
+  Ctx = (LVGL_STATEMENT_CONTEXT *)lv_event_get_user_data (Event);
+  Ta  = lv_event_get_target_obj (Event);
+  (VOID)CommitNumericValue (Ctx, Ta, FALSE);
 }
 
 //
@@ -2035,8 +2090,8 @@ CreateNumericWidget (
   }
 
   //
-  // A one-line textarea accepting only digits. Pressing ENTER fires
-  // LV_EVENT_READY, which OnNumericReady uses to commit.
+  // A one-line textarea accepting only digits. ENTER commits immediately;
+  // leaving the field (arrow keys / mouse) commits when the value changed.
   //
   Ta = lv_textarea_create (Row);
   lv_textarea_set_one_line (Ta, true);
@@ -2057,7 +2112,8 @@ CreateNumericWidget (
   if (Ctx != NULL) {
     Ctx->Statement = Statement;
     Ctx->Widget    = Ta;
-    lv_obj_add_event_cb (Ta, OnNumericReady, LV_EVENT_READY, Ctx);
+    lv_obj_add_event_cb (Ta, OnNumericReady,     LV_EVENT_READY,     Ctx);
+    lv_obj_add_event_cb (Ta, OnNumericDefocused, LV_EVENT_DEFOCUSED, Ctx);
   }
 
   //
