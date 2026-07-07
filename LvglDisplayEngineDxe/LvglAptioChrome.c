@@ -9,6 +9,7 @@
 #include <LvglTheme.h>
 #include <Library/BaseLib.h>
 #include <Library/DebugLib.h>
+#include <Library/PcdLib.h>
 #include <Library/UefiRuntimeServicesTableLib.h>
 #include <Library/HiiLib.h>
 #include <Library/MemoryAllocationLib.h>
@@ -124,14 +125,14 @@ BuildHeader (
 
   // Left: brand title
   Title = lv_label_create (Bar);
-  lv_label_set_text (Title, APTIO_HEADER_TITLE);
+  lv_label_set_text (Title, (CONST CHAR8 *)PcdGetPtr (PcdLvglAptioHeaderTitle));
   lv_obj_set_style_text_font (Title, THEME_FONT_TITLE, 0);
   lv_obj_set_style_text_color (Title, lv_color_hex (THEME_COLOR_HEADER_TEXT), 0);
   lv_obj_align (Title, LV_ALIGN_LEFT_MID, 0, 0);
 
   // Center: vendor / version (dimmed)
   Vendor = lv_label_create (Bar);
-  lv_label_set_text (Vendor, APTIO_HEADER_VENDOR);
+  lv_label_set_text (Vendor, (CONST CHAR8 *)PcdGetPtr (PcdLvglAptioHeaderVendor));
   lv_obj_set_style_text_font (Vendor, THEME_FONT_BODY, 0);
   lv_obj_set_style_text_color (Vendor, lv_color_hex (THEME_COLOR_HEADER_DIM), 0);
   lv_obj_align (Vendor, LV_ALIGN_CENTER, 0, 0);
@@ -407,10 +408,10 @@ AptioBuildChrome (
     lv_obj_clear_flag (Content, LV_OBJ_FLAG_SCROLL_ELASTIC);
     lv_obj_clear_flag (Content, LV_OBJ_FLAG_SCROLL_MOMENTUM);
 
-    // Right: help pane (fixed width). Header label "Help" + body label.
+    // Right: help pane (percentage width). Header label "Help" + body label.
     HelpPane = lv_obj_create (Middle);
     lv_obj_remove_style_all (HelpPane);
-    lv_obj_set_size (HelpPane, THEME_HELPPANE_WIDTH, LV_PCT (100));
+    lv_obj_set_size (HelpPane, LV_PCT (PcdGet8 (PcdLvglHelpPaneWidthPct)), LV_PCT (100));
     lv_obj_set_style_bg_color (HelpPane, lv_color_hex (THEME_COLOR_BG_PANEL), 0);
     lv_obj_set_style_bg_opa (HelpPane, LV_OPA_COVER, 0);
     lv_obj_set_style_border_color (HelpPane, lv_color_hex (THEME_COLOR_BG_SEPARATOR), 0);
