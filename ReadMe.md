@@ -114,6 +114,13 @@ and replace it with:
 LvglPkg/LvglDisplayEngineDxe/LvglDisplayEngineDxe.inf
 ```
 
+`LvglDisplayEngineDxe.inf` (via `LvglLib`) requires the `LvglThemeLib` library
+class for its runtime UI-scale font/metric helpers. Map it in
+`[LibraryClasses]`:
+```
+LvglThemeLib|LvglPkg/Library/LvglThemeLib/LvglThemeLib.inf
+```
+
 ### 2. FDF -- replace the display engine in the firmware image
 
 In `OvmfPkg/OvmfPkgX64.fdf`, do the same swap:
