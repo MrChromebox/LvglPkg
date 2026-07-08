@@ -1043,6 +1043,14 @@ OnIndevFallbackKey (
 
   Focused = (mSession.Group != NULL) ? lv_group_get_focused (mSession.Group) : NULL;
 
+  //
+  // UP/DOWN: walk mNavList (so grayed rows stay reachable). LVGL does not
+  // hard-advance on these keys -- it sends them to the focused object.
+  //
+  // NEXT/PREV (Tab): LVGL always calls focus_next/prev AFTER this indev event
+  // returns, and that path ignores event_stop_processing. Only commit-if-dirty
+  // here; leave the actual focus move to LVGL when the field is unchanged.
+  //
   Forward = (Key == LV_KEY_DOWN) || (Key == LV_KEY_NEXT);
   if ((Key == LV_KEY_UP) || (Key == LV_KEY_DOWN) ||
       (Key == LV_KEY_NEXT) || (Key == LV_KEY_PREV))
@@ -1100,16 +1108,17 @@ OnIndevFallbackKey (
     // After rebuild, focus is restored to Idx (the destination).
     //
     if (TryCommitFocusedThenNav (Idx)) {
-      lv_event_stop_processing (Event);
       return;
     }
 
-    lv_group_focus_obj (mNavList[Idx]);
     //
-    // Stop so LVGL's group handler doesn't also advance on NEXT/PREV (Tab),
-    // which would skip an extra field.
+    // Tab: do not move focus here -- keypad_proc will focus_next/prev next.
+    // Arrows: we own the move (grayed-row support).
     //
-    lv_event_stop_processing (Event);
+    if ((Key == LV_KEY_UP) || (Key == LV_KEY_DOWN)) {
+      lv_group_focus_obj (mNavList[Idx]);
+    }
+
     return;
   }
 
