@@ -3,6 +3,7 @@
 
 #include <Library/LvglLib.h>
 #include <Library/LvglUiConfigLib.h>
+#include <Library/LvglThemeLib.h>
 
 extern UINT8  mExitBtnYes;
 
@@ -76,38 +77,13 @@ UefiLvglInit (
   }
 
   //
-  // Software UI scaling: at 1x use LVGL's stock UEFI backend (zero overhead).
-  // At 1.5x/2x render into a smaller logical canvas and upscale on flush so
-  // widgets and fonts appear physically larger on high-resolution panels.
+  // Always render at the physical framebuffer resolution. UiScale selects
+  // larger fonts and layout metrics via LvglThemeLib (see LvglTheme.h).
   //
   UiScale = LvglGetUiScale ();
-  Display = NULL;
-  if (UiScale != LVGL_UI_SCALE_1X) {
-    EFI_GRAPHICS_OUTPUT_PROTOCOL  *Gop;
-    UINT32                        Num;
-    UINT32                        Den;
+  LvglThemeInitFromUiScale (UiScale);
 
-    Gop = NULL;
-    gBS->HandleProtocol (GopHandle, &gEfiGraphicsOutputProtocolGuid, (VOID **)&Gop);
-    if (Gop != NULL) {
-      if (UiScale == LVGL_UI_SCALE_2X) {
-        Num = 2;
-        Den = 1;
-      } else {
-        Num = 3;
-        Den = 2;
-      }
-
-      Display = LvglCreateScaledDisplay (Gop, Num, Den);
-    }
-  }
-
-  //
-  // 1x, or fall back to the stock backend if scaled creation failed.
-  //
-  if (Display == NULL) {
-    Display = lv_uefi_display_create (GopHandle);
-  }
+  Display = lv_uefi_display_create (GopHandle);
 
   if (Display == NULL) {
     lv_deinit ();

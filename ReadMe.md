@@ -54,12 +54,12 @@ and maps each to an LVGL widget.
 LvglPkg/
 +--- Library/LvglLib/           LVGL UEFI port (display, mouse, keyboard)
 |   +--- LvglLib.c              Init/deinit, tick, main loop
-|   +--- LvglScaledDisplay.c    Logical-canvas upscaling for UI scale
 |   +--- LvglUefiPort.c/.h      libc shim (malloc/string/etc.) for the LVGL build
 |   +--- lv_port_indev.c        Mouse (AbsolutePointer) + keyboard input
 |   +--- MouseCursorIcon.c      Mouse cursor bitmap used by lv_port_indev.c
 |   +--- EscExitHandler.c       ESC-to-exit confirmation popup handling
 |   `--- lvgl/                  Upstream LVGL source (submodule)
++--- Library/LvglThemeLib/      Runtime UI-scale font/metric helpers
 +--- Library/LvglUiConfigLib/   NVRAM/PCD UI configuration helpers
 +--- LvglDisplayEngineDxe/      Display engine DXE driver (the main deliverable)
 |   +--- LvglDisplayEngineDxe.c Protocol installation, entry/unload
@@ -112,6 +112,13 @@ MdeModulePkg/Universal/DisplayEngineDxe/DisplayEngineDxe.inf
 and replace it with:
 ```
 LvglPkg/LvglDisplayEngineDxe/LvglDisplayEngineDxe.inf
+```
+
+`LvglDisplayEngineDxe.inf` (via `LvglLib`) requires the `LvglThemeLib` library
+class for its runtime UI-scale font/metric helpers. Map it in
+`[LibraryClasses]`:
+```
+LvglThemeLib|LvglPkg/Library/LvglThemeLib/LvglThemeLib.inf
 ```
 
 ### 2. FDF -- replace the display engine in the firmware image
@@ -196,7 +203,8 @@ LvglPkg separates **theme** values (rebuild to change) from **platform defaults*
 
 `LvglSetupDxe` publishes a **Graphical UI Configuration** form for:
 
-- **UI scale** -- 1x / 1.5x / 2x logical-canvas upscaling (useful on HiDPI panels)
+- **UI scale** -- 1x / 1.5x / 2x via scaled fonts & layout metrics at native
+  resolution (useful on HiDPI panels)
 - **Centered aspect-ratio frame** -- optional letterboxed window instead of
   edge-to-edge chrome (useful on ultrawide displays)
 
@@ -327,7 +335,7 @@ and string field commits are functional.
 - [x] Aptio-style chrome (header/footer/nav/help pane)
 - [x] Function-key hotkeys (F9 Load Defaults, F10 Save, driver-registered hotkeys)
 - [x] Theme/styling pass (fonts, colors, readability)
-- [x] Software UI scaling (1x / 1.5x / 2x) via logical-canvas upscaling
+- [x] UI scaling (1x / 1.5x / 2x) via scaled fonts & layout metrics (LvglThemeLib)
 - [x] Graphical UI Configuration setup form (`LvglSetupDxe`)
 - [x] Opt-in centered aspect-ratio frame with letterbox backdrop
 - [x] Platform PCDs for chrome strings and layout defaults

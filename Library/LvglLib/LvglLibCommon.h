@@ -37,16 +37,4 @@ LvglUefiEscExitUnregister (
   VOID
   );
 
-//
-// Create an LVGL display that renders at a reduced logical resolution and
-// upscales to the physical framebuffer on flush (software UI scaling).
-// Implemented in LvglScaledDisplay.c.
-//
-lv_display_t *
-LvglCreateScaledDisplay (
-  IN EFI_GRAPHICS_OUTPUT_PROTOCOL  *Gop,
-  IN UINT32                        Num,
-  IN UINT32                        Den
-  );
-
 #endif

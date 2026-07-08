@@ -43,6 +43,7 @@
   HiiLib
   PcdLib
   LvglUiConfigLib
+  LvglThemeLib
   LvglLib
 
 [Guids]

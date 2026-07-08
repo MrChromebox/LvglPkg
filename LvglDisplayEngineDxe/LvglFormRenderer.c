@@ -598,6 +598,7 @@ OnDropdownOpened (
   List = lv_dropdown_get_list (Dd);
   if (List != NULL) {
     lv_obj_set_width (List, LV_SIZE_CONTENT);
+    LvglThemeStyleDropdownList (List);
   }
 }
 
@@ -816,6 +817,97 @@ OnPopupKey (
   }
 }
 
+typedef struct {
+  lv_obj_t  *Overlay;
+  lv_obj_t  *Card;
+  lv_obj_t  *BtnRow;
+} LVGL_DIALOG_SHELL;
+
+/**
+  Shared modal shell: dimmed overlay, dialog card, title, separator, button row.
+**/
+STATIC
+VOID
+CreateDialogShell (
+  OUT LVGL_DIALOG_SHELL  *Shell,
+  IN  CONST CHAR8        *Title
+  )
+{
+  lv_obj_t  *TitleLbl;
+  lv_obj_t  *Sep;
+
+  Shell->Overlay = lv_obj_create (lv_layer_top ());
+  lv_obj_set_size (Shell->Overlay, LV_PCT (100), LV_PCT (100));
+  lv_obj_set_style_bg_color (Shell->Overlay, lv_color_black (), 0);
+  lv_obj_set_style_bg_opa (Shell->Overlay, THEME_OVERLAY_OPA, 0);
+  lv_obj_set_style_border_width (Shell->Overlay, 0, 0);
+  lv_obj_set_style_pad_all (Shell->Overlay, 0, 0);
+  lv_obj_set_flex_flow (Shell->Overlay, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align (
+    Shell->Overlay,
+    LV_FLEX_ALIGN_CENTER,
+    LV_FLEX_ALIGN_CENTER,
+    LV_FLEX_ALIGN_CENTER
+    );
+
+  Shell->Card = lv_obj_create (Shell->Overlay);
+  lv_obj_set_width (Shell->Card, LV_PCT (THEME_DIALOG_WIDTH_PCT));
+  lv_obj_set_height (Shell->Card, LV_SIZE_CONTENT);
+  lv_obj_set_flex_flow (Shell->Card, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_style_pad_all (Shell->Card, THEME_PAD_DIALOG, 0);
+  lv_obj_set_style_pad_row (Shell->Card, THEME_PAD_DIALOG_ROW_GAP, 0);
+  lv_obj_set_style_bg_color (Shell->Card, lv_color_hex (THEME_COLOR_BG_DIALOG), 0);
+  lv_obj_set_style_radius (Shell->Card, THEME_RADIUS, 0);
+  lv_obj_set_style_border_width (Shell->Card, 0, 0);
+
+  TitleLbl = lv_label_create (Shell->Card);
+  lv_label_set_text (TitleLbl, Title);
+  THEME_APPLY_POPUP_FONT (TitleLbl);
+  lv_obj_set_style_text_color (TitleLbl, lv_color_hex (THEME_COLOR_TEXT_TITLE), 0);
+
+  Sep = lv_obj_create (Shell->Card);
+  lv_obj_set_size (Sep, LV_PCT (100), THEME_BORDER_PANE);
+  lv_obj_set_style_bg_color (Sep, lv_color_hex (THEME_COLOR_BG_SEPARATOR), 0);
+  lv_obj_set_style_border_width (Sep, 0, 0);
+  lv_obj_set_style_pad_all (Sep, 0, 0);
+
+  Shell->BtnRow = lv_obj_create (Shell->Card);
+  lv_obj_set_size (Shell->BtnRow, LV_PCT (100), LV_SIZE_CONTENT);
+  lv_obj_set_flex_flow (Shell->BtnRow, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align (
+    Shell->BtnRow,
+    LV_FLEX_ALIGN_END,
+    LV_FLEX_ALIGN_CENTER,
+    LV_FLEX_ALIGN_CENTER
+    );
+  lv_obj_set_style_pad_all (Shell->BtnRow, 0, 0);
+  lv_obj_set_style_border_width (Shell->BtnRow, 0, 0);
+  lv_obj_set_style_bg_opa (Shell->BtnRow, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_pad_column (Shell->BtnRow, THEME_PAD_DIALOG_COL_GAP, 0);
+}
+
+STATIC
+lv_obj_t *
+CreateDialogMessageLabel (
+  IN lv_obj_t      *Card,
+  IN CONST CHAR8   *Text,
+  IN BOOLEAN       Wrap
+  )
+{
+  lv_obj_t  *MsgLbl;
+
+  MsgLbl = lv_label_create (Card);
+  if (Wrap) {
+    lv_label_set_long_mode (MsgLbl, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width (MsgLbl, LV_PCT (100));
+  }
+
+  lv_label_set_text (MsgLbl, Text);
+  lv_obj_set_style_text_color (MsgLbl, lv_color_hex (THEME_COLOR_TEXT_POPUP), 0);
+  THEME_APPLY_BODY_FONT (MsgLbl);
+  return MsgLbl;
+}
+
 /**
   Create a modal confirmation popup on top of the current screen.
 
@@ -834,82 +926,37 @@ ShowPopup (
   IN BOOLEAN       ShowDiscard
   )
 {
-  lv_obj_t  *Overlay;
-  lv_obj_t  *Card;
-  lv_obj_t  *TitleLbl;
-  lv_obj_t  *MsgLbl;
-  lv_obj_t  *Sep;
-  lv_obj_t  *BtnRow;
-  lv_obj_t  *ConfirmBtn;
-  lv_obj_t  *DiscardBtn;
-  lv_obj_t  *CancelBtn;
-  lv_obj_t  *Lbl;
+  LVGL_DIALOG_SHELL  Shell;
+  lv_obj_t           *ConfirmBtn;
+  lv_obj_t           *DiscardBtn;
+  lv_obj_t           *CancelBtn;
+  lv_obj_t           *Lbl;
 
   mPopupConfirmAction = ConfirmAction;
   mPopupResult        = LVGL_POPUP_PENDING;
   mPopupHasDiscard    = ShowDiscard;
   mPopupPrevFocus     = (Group != NULL) ? lv_group_get_focused (Group) : NULL;
 
-  //
-  // Semi-transparent full-screen overlay that blocks clicks on form widgets.
-  //
-  Overlay = lv_obj_create (lv_layer_top ());
-  lv_obj_set_size (Overlay, LV_PCT (100), LV_PCT (100));
-  lv_obj_set_style_bg_color (Overlay, lv_color_black (), 0);
-  lv_obj_set_style_bg_opa (Overlay, THEME_OVERLAY_OPA, 0);
-  lv_obj_set_style_border_width (Overlay, 0, 0);
-  lv_obj_set_style_pad_all (Overlay, 0, 0);
-  lv_obj_set_flex_flow (Overlay, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_flex_align (Overlay, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-  mPopupOverlay = Overlay;
+  CreateDialogShell (&Shell, Title);
+  mPopupOverlay = Shell.Overlay;
 
-  //
-  // Dialog card.
-  //
-  Card = lv_obj_create (Overlay);
-  lv_obj_set_width (Card, LV_PCT (THEME_DIALOG_WIDTH_PCT));
-  lv_obj_set_height (Card, LV_SIZE_CONTENT);
-  lv_obj_set_flex_flow (Card, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_style_pad_all (Card, THEME_PAD_DIALOG, 0);
-  lv_obj_set_style_pad_row (Card, THEME_PAD_DIALOG_ROW_GAP, 0);
-  lv_obj_set_style_bg_color (Card, lv_color_hex (THEME_COLOR_BG_DIALOG), 0);
-  lv_obj_set_style_radius (Card, THEME_RADIUS, 0);
-  lv_obj_set_style_border_width (Card, 0, 0);
-
-  TitleLbl = lv_label_create (Card);
-  lv_label_set_text (TitleLbl, Title);
-  lv_obj_set_style_text_font (TitleLbl, THEME_FONT_POPUP, 0);
-  lv_obj_set_style_text_color (TitleLbl, lv_color_hex (THEME_COLOR_TEXT_TITLE), 0);
-
-  Sep = lv_obj_create (Card);
-  lv_obj_set_size (Sep, LV_PCT (100), THEME_BORDER_PANE);
-  lv_obj_set_style_bg_color (Sep, lv_color_hex (THEME_COLOR_BG_SEPARATOR), 0);
-  lv_obj_set_style_border_width (Sep, 0, 0);
-  lv_obj_set_style_pad_all (Sep, 0, 0);
-
-  MsgLbl = lv_label_create (Card);
-  lv_label_set_text (MsgLbl, ShowDiscard ? "You have unsaved changes." : "Save the current settings?");
-  lv_obj_set_style_text_color (MsgLbl, lv_color_hex (THEME_COLOR_TEXT_POPUP), 0);
-
-  BtnRow = lv_obj_create (Card);
-  lv_obj_set_size (BtnRow, LV_PCT (100), LV_SIZE_CONTENT);
-  lv_obj_set_flex_flow (BtnRow, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align (BtnRow, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-  lv_obj_set_style_pad_all (BtnRow, 0, 0);
-  lv_obj_set_style_border_width (BtnRow, 0, 0);
-  lv_obj_set_style_bg_opa (BtnRow, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_pad_column (BtnRow, THEME_PAD_DIALOG_COL_GAP, 0);
+  CreateDialogMessageLabel (
+    Shell.Card,
+    ShowDiscard ? "You have unsaved changes." : "Save the current settings?",
+    FALSE
+    );
 
   //
   // Confirm (Save / Load) button.
   //
-  ConfirmBtn = lv_btn_create (BtnRow);
+  ConfirmBtn = lv_btn_create (Shell.BtnRow);
   Lbl        = lv_label_create (ConfirmBtn);
   {
     CHAR8  ConfirmText[64];
     AsciiSPrint (ConfirmText, sizeof (ConfirmText), "%a (Y)", ConfirmLabel);
     lv_label_set_text (Lbl, ConfirmText);
   }
+  LvglThemeStyleButtonLabel (ConfirmBtn, Lbl);
   lv_obj_add_event_cb (ConfirmBtn, OnPopupBtn, LV_EVENT_CLICKED, &mPopupConfirmAction);
   lv_obj_add_event_cb (ConfirmBtn, OnPopupKey, LV_EVENT_KEY, NULL);
   lv_group_add_obj (Group, ConfirmBtn);
@@ -920,9 +967,10 @@ ShowPopup (
   // Optional Discard button (shown for "unsaved changes" popup only).
   //
   if (ShowDiscard) {
-    DiscardBtn = lv_btn_create (BtnRow);
+    DiscardBtn = lv_btn_create (Shell.BtnRow);
     Lbl        = lv_label_create (DiscardBtn);
     lv_label_set_text (Lbl, "Discard (N)");
+    LvglThemeStyleButtonLabel (DiscardBtn, Lbl);
     lv_obj_add_event_cb (DiscardBtn, OnPopupBtn, LV_EVENT_CLICKED, &mDiscardAction);
     lv_obj_add_event_cb (DiscardBtn, OnPopupKey, LV_EVENT_KEY, NULL);
     lv_group_add_obj (Group, DiscardBtn);
@@ -932,9 +980,10 @@ ShowPopup (
   //
   // Cancel button.
   //
-  CancelBtn = lv_btn_create (BtnRow);
+  CancelBtn = lv_btn_create (Shell.BtnRow);
   Lbl       = lv_label_create (CancelBtn);
   lv_label_set_text (Lbl, "Cancel (Esc)");
+  LvglThemeStyleButtonLabel (CancelBtn, Lbl);
   lv_obj_add_event_cb (CancelBtn, OnPopupBtn, LV_EVENT_CLICKED, &mNoneAction);
   lv_obj_add_event_cb (CancelBtn, OnPopupKey, LV_EVENT_KEY, NULL);
   lv_group_add_obj (Group, CancelBtn);
@@ -1593,6 +1642,7 @@ StyleRow (
   lv_obj_set_style_pad_bottom (Row, THEME_PAD_ROW_Y, 0);
   lv_obj_set_style_text_color (Row, lv_color_hex (THEME_COLOR_ROW_TEXT), 0);
   lv_obj_set_style_shadow_width (Row, 0, 0);
+  LvglThemeApplyBodyFont (Row);
 
   // hovered: slight elevation, no border -- shows intent before click/focus
   lv_obj_set_style_bg_color (Row, lv_color_hex (THEME_COLOR_ROW_BG_HOVER), LV_STATE_HOVERED);
@@ -1734,7 +1784,7 @@ CreateSubtitleWidget (
   lv_label_set_long_mode (Label, LV_LABEL_LONG_WRAP);
   lv_obj_set_width (Label, LV_PCT (100));
   lv_label_set_text (Label, Text);
-  lv_obj_set_style_text_font (Label, THEME_FONT_BODY, 0);
+  THEME_APPLY_BODY_FONT (Label);
   lv_obj_set_style_text_color (Label, lv_palette_main (THEME_ACCENT_PALETTE), 0);
   lv_obj_set_style_pad_top (Label, THEME_PAD_LABEL_TOP, 0);
 
@@ -1778,10 +1828,12 @@ CreateTextWidget (
   PromptLabel = lv_label_create (Row);
   lv_label_set_text (PromptLabel, Prompt);
   lv_obj_set_flex_grow (PromptLabel, 1);
+  LvglThemeApplyBodyFont (PromptLabel);
 
   if (ValueUtf8 != NULL) {
     ValueLabel = lv_label_create (Row);
     lv_label_set_text (ValueLabel, ValueUtf8);
+    LvglThemeApplyBodyFont (ValueLabel);
     FreePool (ValueUtf8);
   }
 
@@ -1836,7 +1888,7 @@ CreateBannerWidget (
   lv_label_set_long_mode (Label, LV_LABEL_LONG_WRAP);
   lv_obj_set_width (Label, LV_PCT (100));
   lv_label_set_text (Label, Utf8);
-  lv_obj_set_style_text_font (Label, THEME_FONT_BODY, 0);
+  THEME_APPLY_BODY_FONT (Label);
   lv_obj_set_style_text_color (Label, lv_color_hex (THEME_COLOR_TEXT_PRIMARY), 0);
 
   switch (Banner->Alignment) {
@@ -1948,6 +2000,7 @@ CreateCheckboxWidget (
   Label = lv_label_create (Row);
   lv_label_set_text (Label, Text != NULL ? Text : "Checkbox");
   lv_obj_set_flex_grow (Label, 1);
+  LvglThemeApplyBodyFont (Label);
 
   //
   // The checkbox itself renders the indicator only; its prompt text is
@@ -1957,6 +2010,7 @@ CreateCheckboxWidget (
   lv_checkbox_set_text (Cb, "");
   lv_obj_set_style_bg_opa (Cb, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_border_width (Cb, 0, LV_PART_MAIN);
+  LvglThemeStyleCheckbox (Cb);
 
   if (Statement->CurrentValue.Value.b) {
     lv_obj_add_state (Cb, LV_STATE_CHECKED);
@@ -2015,6 +2069,7 @@ CreateNumericWidget (
   Label = lv_label_create (Row);
   lv_label_set_text (Label, Text != NULL ? Text : "Numeric");
   lv_obj_set_flex_grow (Label, 1);
+  LvglThemeApplyBodyFont (Label);
 
   NumOp = (EFI_IFR_NUMERIC *)Statement->OpCode;
   GetNumericRange (NumOp, &MinVal, &MaxVal);
@@ -2047,6 +2102,7 @@ CreateNumericWidget (
 
   Uint64ToAsciiDecimal (CurVal, Initial, sizeof (Initial));
   lv_textarea_set_text (Ta, Initial);
+  LvglThemeStyleTextarea (Ta);
 
   if (Statement->Attribute & HII_DISPLAY_GRAYOUT) {
     lv_obj_add_state (Row, LV_STATE_DISABLED);
@@ -2106,7 +2162,8 @@ CreateDateTimeField (
   //
   // Roughly size the field to its digit count (glyph ~12 px + padding).
   //
-  lv_obj_set_width (Ta, (lv_coord_t)(Digits * 12 + 28));
+  lv_obj_set_width (Ta, (lv_coord_t)LvglThemeDateTimeFieldWidth (Digits));
+  LvglThemeStyleTextarea (Ta);
 
   lv_obj_add_event_cb (Ta, OnDateTimeReady, LV_EVENT_READY, DtCtx);
 
@@ -2159,6 +2216,7 @@ CreateDateTimeWidget (
   Label = lv_label_create (Row);
   lv_label_set_text (Label, Text != NULL ? Text : (IsDate ? "Date" : "Time"));
   lv_obj_set_flex_grow (Label, 1);
+  LvglThemeApplyBodyFont (Label);
 
   if (IsDate) {
     C0           = ClampU64 (Statement->CurrentValue.Value.date.Month, 1, 12);
@@ -2200,11 +2258,13 @@ CreateDateTimeWidget (
 
   Sep = lv_label_create (Row);
   lv_label_set_text (Sep, SepText);
+  LvglThemeApplyBodyFont (Sep);
 
   DtCtx->Field1 = CreateDateTimeField (Row, C1, 2, Group, DtCtx, HelpCtx);
 
   Sep = lv_label_create (Row);
   lv_label_set_text (Sep, SepText);
+  LvglThemeApplyBodyFont (Sep);
 
   DtCtx->Field2 = CreateDateTimeField (Row, C2, Field2Digits, Group, DtCtx, HelpCtx);
 
@@ -2283,6 +2343,7 @@ CreateOneOfWidget (
   Label = lv_label_create (Row);
   lv_label_set_text (Label, Text != NULL ? Text : "OneOf");
   lv_obj_set_flex_grow (Label, 1);
+  LvglThemeApplyBodyFont (Label);
 
   //
   // Build newline-separated option string for LVGL dropdown.
@@ -2359,14 +2420,15 @@ CreateOneOfWidget (
   Dd = lv_dropdown_create (Row);
   lv_dropdown_set_options (Dd, OptBuf);
   lv_dropdown_set_selected (Dd, SelectedIdx);
+  LvglThemeStyleDropdown (Dd);
 
   //
   // Pixel-width estimate so the closed button fits its longest option:
-  // ~10 px per glyph for the default font + 50 px slack for chevron and
-  // horizontal padding. LV_SIZE_CONTENT collapses the dropdown to just
-  // the chevron, so we use an explicit width instead.
+  // ~10 px per glyph for the body font + slack for chevron and padding.
+  // LV_SIZE_CONTENT collapses the dropdown to just the chevron, so we use
+  // an explicit width instead.
   //
-  lv_obj_set_width (Dd, (lv_coord_t)(MaxChars * 10 + 50));
+  lv_obj_set_width (Dd, (lv_coord_t)LvglThemeDropdownWidth (MaxChars));
 
   if (Statement->Attribute & HII_DISPLAY_GRAYOUT) {
     lv_obj_add_state (Row, LV_STATE_DISABLED);
@@ -2460,10 +2522,11 @@ CreateOrderedListWidget (
   lv_obj_set_style_bg_opa (Panel, LV_OPA_TRANSP, 0);
   lv_obj_set_style_text_color (Panel, lv_color_hex (
       Grayout ? THEME_COLOR_ROW_TEXT_DISABLED : THEME_COLOR_TEXT_PRIMARY), 0);
+  THEME_APPLY_BODY_FONT (Panel);
 
   Header = lv_label_create (Panel);
   lv_label_set_text (Header, PromptText != NULL ? PromptText : "Ordered List");
-  lv_obj_set_style_text_font (Header, THEME_FONT_BODY, 0);
+  THEME_APPLY_BODY_FONT (Header);
 
   for (i = 0; i < ActiveCount; i++) {
     Value = GetArrayData (Statement->CurrentValue.Buffer, ValueType, i);
@@ -2522,6 +2585,7 @@ CreateOrderedListWidget (
     lv_obj_set_flex_grow (Label, 1);
     lv_obj_set_style_text_color (Label, lv_color_hex (
         Grayout ? THEME_COLOR_ROW_TEXT_DISABLED : THEME_COLOR_TEXT_PRIMARY), 0);
+    LvglThemeApplyBodyFont (Label);
 
     if (OptStr8 != NULL) {
       FreePool (OptStr8);
@@ -2533,6 +2597,7 @@ CreateOrderedListWidget (
     UpBtn    = lv_btn_create (Row);
     BtnLabel = lv_label_create (UpBtn);
     lv_label_set_text (BtnLabel, LV_SYMBOL_UP);
+    LvglThemeStyleButtonLabel (UpBtn, BtnLabel);
 
     if (Grayout || (i == 0)) {
       lv_obj_add_state (UpBtn, LV_STATE_DISABLED);
@@ -2556,6 +2621,7 @@ CreateOrderedListWidget (
     DownBtn  = lv_btn_create (Row);
     BtnLabel = lv_label_create (DownBtn);
     lv_label_set_text (BtnLabel, LV_SYMBOL_DOWN);
+    LvglThemeStyleButtonLabel (DownBtn, BtnLabel);
 
     if (Grayout || (i + 1 >= ActiveCount)) {
       lv_obj_add_state (DownBtn, LV_STATE_DISABLED);
@@ -2607,6 +2673,7 @@ CreateStringWidget (
   Label = lv_label_create (Row);
   lv_label_set_text (Label, Text != NULL ? Text : "String");
   lv_obj_set_flex_grow (Label, 1);
+  LvglThemeApplyBodyFont (Label);
 
   Ta = lv_textarea_create (Row);
   lv_textarea_set_one_line (Ta, true);
@@ -2631,6 +2698,8 @@ CreateStringWidget (
       }
     }
   }
+
+  LvglThemeStyleTextarea (Ta);
 
   if (Statement->Attribute & HII_DISPLAY_GRAYOUT) {
     lv_obj_add_state (Row, LV_STATE_DISABLED);
@@ -2686,6 +2755,7 @@ CreateRefWidget (
   Label = lv_label_create (Btn);
   lv_label_set_text (Label, Text != NULL ? Text : "Goto");
   lv_obj_align (Label, LV_ALIGN_LEFT_MID, 0, 0);
+  LvglThemeApplyBodyFont (Label);
 
   if (Statement->Attribute & HII_DISPLAY_GRAYOUT) {
     lv_obj_add_state (Btn, LV_STATE_DISABLED);
@@ -2951,6 +3021,7 @@ LvglRenderForm (
   mSession.OnScreenKb = lv_keyboard_create (mSession.Screen);
   lv_obj_set_size (mSession.OnScreenKb, LV_PCT (100), LV_PCT (40));
   lv_obj_align (mSession.OnScreenKb, LV_ALIGN_BOTTOM_MID, 0, 0);
+  LvglThemeStyleKeyboard (mSession.OnScreenKb);
   lv_obj_add_flag (mSession.OnScreenKb, LV_OBJ_FLAG_HIDDEN);
   lv_obj_add_event_cb (mSession.OnScreenKb, OnKeyboardCancel, LV_EVENT_CANCEL, NULL);
   //
@@ -3190,6 +3261,7 @@ AddHiiPopupButton (
   Btn = lv_btn_create (Row);
   Lbl = lv_label_create (Btn);
   lv_label_set_text (Lbl, Label);
+  LvglThemeStyleButtonLabel (Btn, Lbl);
   lv_obj_add_event_cb (Btn, OnHiiPopupBtn, LV_EVENT_CLICKED, (void *)(UINTN)(Selection + 1));
   lv_obj_add_event_cb (Btn, OnHiiPopupKey, LV_EVENT_KEY, NULL);
   lv_group_add_obj (Group, Btn);
@@ -3208,12 +3280,7 @@ ShowHiiPopup (
   IN EFI_HII_POPUP_TYPE   PopupType
   )
 {
-  lv_obj_t  *Overlay;
-  lv_obj_t  *Card;
-  lv_obj_t  *TitleLbl;
-  lv_obj_t  *Sep;
-  lv_obj_t  *MsgLbl;
-  lv_obj_t  *BtnRow;
+  LVGL_DIALOG_SHELL  Shell;
 
   mHiiPopupSel    = LVGL_HII_POPUP_PENDING;
   mHiiPopupYesSel = LVGL_HII_POPUP_PENDING;
@@ -3221,69 +3288,27 @@ ShowHiiPopup (
   mHiiPopupEscSel = LVGL_HII_POPUP_PENDING;
   mHiiPopupGroup  = Group;
 
-  Overlay = lv_obj_create (lv_layer_top ());
-  lv_obj_set_size (Overlay, LV_PCT (100), LV_PCT (100));
-  lv_obj_set_style_bg_color (Overlay, lv_color_black (), 0);
-  lv_obj_set_style_bg_opa (Overlay, THEME_OVERLAY_OPA, 0);
-  lv_obj_set_style_border_width (Overlay, 0, 0);
-  lv_obj_set_style_pad_all (Overlay, 0, 0);
-  lv_obj_set_flex_flow (Overlay, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_flex_align (Overlay, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-  mHiiPopupOverlay = Overlay;
-
-  Card = lv_obj_create (Overlay);
-  lv_obj_set_width (Card, LV_PCT (THEME_DIALOG_WIDTH_PCT));
-  lv_obj_set_height (Card, LV_SIZE_CONTENT);
-  lv_obj_set_flex_flow (Card, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_style_pad_all (Card, THEME_PAD_DIALOG, 0);
-  lv_obj_set_style_pad_row (Card, THEME_PAD_DIALOG_ROW_GAP, 0);
-  lv_obj_set_style_bg_color (Card, lv_color_hex (THEME_COLOR_BG_DIALOG), 0);
-  lv_obj_set_style_radius (Card, THEME_RADIUS, 0);
-  lv_obj_set_style_border_width (Card, 0, 0);
-
-  TitleLbl = lv_label_create (Card);
-  lv_label_set_text (TitleLbl, Title);
-  lv_obj_set_style_text_font (TitleLbl, THEME_FONT_POPUP, 0);
-  lv_obj_set_style_text_color (TitleLbl, lv_color_hex (THEME_COLOR_TEXT_TITLE), 0);
-
-  Sep = lv_obj_create (Card);
-  lv_obj_set_size (Sep, LV_PCT (100), THEME_BORDER_PANE);
-  lv_obj_set_style_bg_color (Sep, lv_color_hex (THEME_COLOR_BG_SEPARATOR), 0);
-  lv_obj_set_style_border_width (Sep, 0, 0);
-  lv_obj_set_style_pad_all (Sep, 0, 0);
-
-  MsgLbl = lv_label_create (Card);
-  lv_label_set_long_mode (MsgLbl, LV_LABEL_LONG_WRAP);
-  lv_obj_set_width (MsgLbl, LV_PCT (100));
-  lv_label_set_text (MsgLbl, Message);
-  lv_obj_set_style_text_color (MsgLbl, lv_color_hex (THEME_COLOR_TEXT_POPUP), 0);
-
-  BtnRow = lv_obj_create (Card);
-  lv_obj_set_size (BtnRow, LV_PCT (100), LV_SIZE_CONTENT);
-  lv_obj_set_flex_flow (BtnRow, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align (BtnRow, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-  lv_obj_set_style_pad_all (BtnRow, 0, 0);
-  lv_obj_set_style_border_width (BtnRow, 0, 0);
-  lv_obj_set_style_bg_opa (BtnRow, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_pad_column (BtnRow, THEME_PAD_DIALOG_COL_GAP, 0);
+  CreateDialogShell (&Shell, Title);
+  mHiiPopupOverlay = Shell.Overlay;
+  CreateDialogMessageLabel (Shell.Card, Message, TRUE);
 
   switch (PopupType) {
     case EfiHiiPopupTypeOk:
-      mHiiPopupFirst  = AddHiiPopupButton (BtnRow, Group, "OK", EfiHiiPopupSelectionOk);
+      mHiiPopupFirst  = AddHiiPopupButton (Shell.BtnRow, Group, "OK", EfiHiiPopupSelectionOk);
       mHiiPopupLast   = mHiiPopupFirst;
       mHiiPopupEscSel = EfiHiiPopupSelectionOk;
       break;
 
     case EfiHiiPopupTypeOkCancel:
-      mHiiPopupFirst  = AddHiiPopupButton (BtnRow, Group, "OK", EfiHiiPopupSelectionOk);
-      mHiiPopupLast   = AddHiiPopupButton (BtnRow, Group, "Cancel", EfiHiiPopupSelectionCancel);
+      mHiiPopupFirst  = AddHiiPopupButton (Shell.BtnRow, Group, "OK", EfiHiiPopupSelectionOk);
+      mHiiPopupLast   = AddHiiPopupButton (Shell.BtnRow, Group, "Cancel", EfiHiiPopupSelectionCancel);
       mHiiPopupEscSel = EfiHiiPopupSelectionCancel;
       break;
 
     case EfiHiiPopupTypeYesNoCancel:
-      mHiiPopupFirst  = AddHiiPopupButton (BtnRow, Group, "Yes (Y)", EfiHiiPopupSelectionYes);
-      (VOID)AddHiiPopupButton (BtnRow, Group, "No (N)", EfiHiiPopupSelectionNo);
-      mHiiPopupLast   = AddHiiPopupButton (BtnRow, Group, "Cancel", EfiHiiPopupSelectionCancel);
+      mHiiPopupFirst  = AddHiiPopupButton (Shell.BtnRow, Group, "Yes (Y)", EfiHiiPopupSelectionYes);
+      (VOID)AddHiiPopupButton (Shell.BtnRow, Group, "No (N)", EfiHiiPopupSelectionNo);
+      mHiiPopupLast   = AddHiiPopupButton (Shell.BtnRow, Group, "Cancel", EfiHiiPopupSelectionCancel);
       mHiiPopupYesSel = EfiHiiPopupSelectionYes;
       mHiiPopupNoSel  = EfiHiiPopupSelectionNo;
       mHiiPopupEscSel = EfiHiiPopupSelectionCancel;
@@ -3291,8 +3316,8 @@ ShowHiiPopup (
 
     case EfiHiiPopupTypeYesNo:
     default:
-      mHiiPopupFirst  = AddHiiPopupButton (BtnRow, Group, "Yes (Y)", EfiHiiPopupSelectionYes);
-      mHiiPopupLast   = AddHiiPopupButton (BtnRow, Group, "No (N)", EfiHiiPopupSelectionNo);
+      mHiiPopupFirst  = AddHiiPopupButton (Shell.BtnRow, Group, "Yes (Y)", EfiHiiPopupSelectionYes);
+      mHiiPopupLast   = AddHiiPopupButton (Shell.BtnRow, Group, "No (N)", EfiHiiPopupSelectionNo);
       mHiiPopupYesSel = EfiHiiPopupSelectionYes;
       mHiiPopupNoSel  = EfiHiiPopupSelectionNo;
       mHiiPopupEscSel = EfiHiiPopupSelectionNo;

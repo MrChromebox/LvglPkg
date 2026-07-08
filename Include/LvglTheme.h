@@ -12,7 +12,7 @@
 #ifndef LVGL_THEME_H_
 #define LVGL_THEME_H_
 
-#include <lvgl.h>
+#include <Library/LvglThemeLib.h>
 
 //
 // Background colors (24-bit RGB; passed to lv_color_hex())
@@ -59,26 +59,29 @@
 #define THEME_ACCENT_PALETTE      LV_PALETTE_BLUE
 
 //
-// Fonts -- must be enabled in lv_conf.h
+// Fonts -- must be enabled in lv_conf.h. Sizes scale with UiScale via
+// LvglThemeFont*() (base: title 20, body/popup 16).
 //
-#define THEME_FONT_TITLE          (&lv_font_montserrat_20)
-#define THEME_FONT_BODY           (&lv_font_montserrat_16)
-#define THEME_FONT_POPUP          (&lv_font_montserrat_16)
+#define THEME_FONT_TITLE          LvglThemeFontTitle()
+#define THEME_FONT_BODY           LvglThemeFontBody()
+#define THEME_FONT_POPUP          LvglThemeFontPopup()
+#define THEME_APPLY_BODY_FONT     LvglThemeApplyBodyFont
+#define THEME_APPLY_POPUP_FONT    LvglThemeApplyPopupFont
 
 //
-// Spacing & shape (pixels)
+// Spacing & shape (base pixels at 1x; scaled via LvglThemePx()).
 //
-#define THEME_PAD_SCREEN          16
-#define THEME_PAD_PANEL           8
-#define THEME_PAD_ROW             4
-#define THEME_PAD_ROW_TIGHT       2
-#define THEME_PAD_DIALOG          16
-#define THEME_PAD_DIALOG_ROW_GAP  10
-#define THEME_PAD_DIALOG_COL_GAP  8
-#define THEME_PAD_SCREEN_ROW_GAP  6
-#define THEME_PAD_PANEL_ROW_GAP   4
-#define THEME_PAD_LABEL_TOP       8
-#define THEME_RADIUS              8
+#define THEME_PAD_SCREEN          LvglThemePx(16)
+#define THEME_PAD_PANEL           LvglThemePx(8)
+#define THEME_PAD_ROW             LvglThemePx(4)
+#define THEME_PAD_ROW_TIGHT       LvglThemePx(2)
+#define THEME_PAD_DIALOG          LvglThemePx(16)
+#define THEME_PAD_DIALOG_ROW_GAP  LvglThemePx(10)
+#define THEME_PAD_DIALOG_COL_GAP  LvglThemePx(8)
+#define THEME_PAD_SCREEN_ROW_GAP  LvglThemePx(6)
+#define THEME_PAD_PANEL_ROW_GAP   LvglThemePx(4)
+#define THEME_PAD_LABEL_TOP       LvglThemePx(8)
+#define THEME_RADIUS              LvglThemePx(8)
 #define THEME_OVERLAY_OPA         LV_OPA_50
 
 //
@@ -96,50 +99,50 @@
 #define THEME_COLOR_FOOTER_DIM        0x6A7B92
 #define THEME_COLOR_HIGHLIGHT_ROW     THEME_COLOR_ACCENT
 
-#define THEME_HEADER_HEIGHT       44
-#define THEME_SUBTITLE_HEIGHT     28
-#define THEME_FOOTER_HEIGHT       32
+#define THEME_HEADER_HEIGHT       LvglThemePx(44)
+#define THEME_SUBTITLE_HEIGHT     LvglThemePx(28)
+#define THEME_FOOTER_HEIGHT       LvglThemePx(32)
 
 //
 // Chrome -- help pane (right column).
 //
-#define THEME_PAD_HELPPANE_X         14
-#define THEME_PAD_HELPPANE_Y         12
-#define THEME_PAD_HELPPANE_ROW_GAP   8
+#define THEME_PAD_HELPPANE_X         LvglThemePx(14)
+#define THEME_PAD_HELPPANE_Y         LvglThemePx(12)
+#define THEME_PAD_HELPPANE_ROW_GAP   LvglThemePx(8)
 
 //
 // Chrome -- header / subtitle / content / footer paddings.
 //
-#define THEME_PAD_HEADER_X           16
-#define THEME_PAD_SUBTITLE_X         16
-#define THEME_PAD_CONTENT_LEFT       24
-#define THEME_PAD_CONTENT_RIGHT      16
-#define THEME_PAD_CONTENT_Y          12
-#define THEME_PAD_CONTENT_ROW_GAP    6
-#define THEME_PAD_FOOTER_X           12
-#define THEME_PAD_FOOTER_Y           2
-#define THEME_PAD_FOOTER_COL_GAP     6
+#define THEME_PAD_HEADER_X           LvglThemePx(16)
+#define THEME_PAD_SUBTITLE_X         LvglThemePx(16)
+#define THEME_PAD_CONTENT_LEFT       LvglThemePx(24)
+#define THEME_PAD_CONTENT_RIGHT      LvglThemePx(16)
+#define THEME_PAD_CONTENT_Y          LvglThemePx(12)
+#define THEME_PAD_CONTENT_ROW_GAP    LvglThemePx(6)
+#define THEME_PAD_FOOTER_X           LvglThemePx(12)
+#define THEME_PAD_FOOTER_Y           LvglThemePx(2)
+#define THEME_PAD_FOOTER_COL_GAP     LvglThemePx(6)
 
 //
 // Footer "chip" widgets (one per registered hotkey + nav primitives).
 //
-#define THEME_PAD_CHIP_X             8
-#define THEME_PAD_CHIP_Y             4
-#define THEME_PAD_CHIP_COL_GAP       6
-#define THEME_RADIUS_CHIP            4
+#define THEME_PAD_CHIP_X             LvglThemePx(8)
+#define THEME_PAD_CHIP_Y             LvglThemePx(4)
+#define THEME_PAD_CHIP_COL_GAP       LvglThemePx(6)
+#define THEME_RADIUS_CHIP            LvglThemePx(4)
 
 //
 // Form rows (StyleRow).
 //
-#define THEME_RADIUS_ROW             4
-#define THEME_PAD_ROW_X              16
-#define THEME_PAD_ROW_Y              10
-#define THEME_BORDER_FOCUS           3
+#define THEME_RADIUS_ROW             LvglThemePx(4)
+#define THEME_PAD_ROW_X              LvglThemePx(16)
+#define THEME_PAD_ROW_Y              LvglThemePx(10)
+#define THEME_BORDER_FOCUS           LvglThemePx(3)
 
 //
 // Generic 1 px separator/border thickness used between panes.
 //
-#define THEME_BORDER_PANE            1
+#define THEME_BORDER_PANE            LvglThemePx(1)
 
 //
 // Confirm/discard dialog card width as a percentage of the screen.

@@ -20,7 +20,6 @@
 
 [Sources]
   LvglLib.c
-  LvglScaledDisplay.c
   LvglUefiPort.h
   LvglUefiPort.c
 
@@ -517,6 +516,7 @@
   PrintLib
   BaseLib
   LvglUiConfigLib
+  LvglThemeLib
 
 [Protocols]
   gEfiGraphicsOutputProtocolGuid
