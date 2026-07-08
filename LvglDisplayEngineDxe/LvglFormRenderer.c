@@ -32,6 +32,56 @@ STATIC FORM_DISPLAY_ENGINE_STATEMENT  *mNavStatement[LVGL_NAV_MAX];
 STATIC UINTN                          mNavCount = 0;
 
 //
+// Editable field registry -- commit dirty values when leaving a field via
+// Tab/arrows or when exiting the form (ESC), not only on Enter.
+//
+typedef struct {
+  FORM_DISPLAY_ENGINE_STATEMENT  *Statement;
+  BOOLEAN                        IsDate;
+  lv_obj_t                       *Field0;
+  lv_obj_t                       *Field1;
+  lv_obj_t                       *Field2;
+} LVGL_DATETIME_CTX;
+
+typedef enum {
+  LVGL_EDIT_NUMERIC,
+  LVGL_EDIT_STRING,
+  LVGL_EDIT_DATETIME,
+} LVGL_EDIT_KIND;
+
+typedef struct {
+  LVGL_EDIT_KIND  Kind;
+  union {
+    LVGL_STATEMENT_CONTEXT  *TextCtx;
+    LVGL_DATETIME_CTX       *DateTime;
+  } u;
+} LVGL_EDIT_ENTRY;
+
+#define LVGL_EDIT_MAX  64
+
+STATIC LVGL_EDIT_ENTRY  mEditRegistry[LVGL_EDIT_MAX];
+STATIC UINTN            mEditRegistryCount = 0;
+
+//
+// After a nav-time commit, SetupBrowser highlights the edited question.
+// Prefer the intended destination nav index on the next FormDisplay.
+//
+STATIC BOOLEAN  mRestoreFocusPending = FALSE;
+STATIC UINTN    mRestoreFocusNavIdx  = 0;
+
+//
+// Deferred exit/submenu click after committing the focused dirty field once.
+//
+typedef struct {
+  BOOLEAN              Active;
+  UINT32               Action;
+  UINT16               DefaultId;
+  EFI_IFR_OP_HEADER    *OpCode;
+} LVGL_PENDING_LEAVE;
+
+STATIC LVGL_PENDING_LEAVE  mPendingLeave;
+
+//
 // Live banner refresh. Front-page banner lines (e.g. the battery status) are
 // updated in place by their producer via HiiSetString while the form stays
 // open. The banner labels are built once, so we poll their HII strings on a
@@ -109,6 +159,9 @@ STATIC VOID CreateStringWidget        (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STA
 STATIC VOID CreateRefWidget           (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle, lv_group_t *Group);
 STATIC VOID CreateActionWidget        (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle, lv_group_t *Group);
 STATIC VOID CreateDateTimeWidget      (lv_obj_t *Parent, FORM_DISPLAY_ENGINE_STATEMENT *Statement, EFI_HII_HANDLE HiiHandle, lv_group_t *Group, BOOLEAN IsDate);
+STATIC VOID RequestUserExit (IN UINT32 Action, IN UINT16 DefaultId, IN FORM_DISPLAY_ENGINE_STATEMENT *Statement OPTIONAL);
+STATIC BOOLEAN CompletePendingLeaveIfReady (VOID);
+STATIC BOOLEAN TryCommitFocusedThenNav (IN UINTN DestNavIdx);
 
 //
 // ---- Helper: UCS-2 string to UTF-8 for LVGL ----
@@ -307,18 +360,21 @@ typedef struct {
   in which case Ctx->Statement is dangling. Assigning a stale pointer to
   USER_INPUT.SelectedStatement causes SetupBrowserDxe's GetBrowserStatement
   to return NULL and assert at Presentation.c(1619).
+
+  Match by OpCode -- the IFR opcode pointer is stable across browser
+  FormDisplay rebuilds; the FORM_DISPLAY_ENGINE_STATEMENT wrapper is not.
 **/
 STATIC
-BOOLEAN
-IsStatementInCurrentForm (
-  IN FORM_DISPLAY_ENGINE_STATEMENT  *Statement
+FORM_DISPLAY_ENGINE_STATEMENT *
+FindStatementByOpCode (
+  IN EFI_IFR_OP_HEADER  *OpCode
   )
 {
   LIST_ENTRY                     *Link;
   FORM_DISPLAY_ENGINE_STATEMENT  *Walk;
 
-  if ((Statement == NULL) || (mSession.FormData == NULL)) {
-    return FALSE;
+  if ((OpCode == NULL) || (mSession.FormData == NULL)) {
+    return NULL;
   }
 
   for (Link = mSession.FormData->StatementListHead.ForwardLink;
@@ -326,12 +382,25 @@ IsStatementInCurrentForm (
        Link = Link->ForwardLink)
   {
     Walk = FORM_DISPLAY_ENGINE_STATEMENT_FROM_LINK (Link);
-    if (Walk == Statement) {
-      return TRUE;
+    if (Walk->OpCode == OpCode) {
+      return Walk;
     }
   }
 
-  return FALSE;
+  return NULL;
+}
+
+STATIC
+BOOLEAN
+IsStatementInCurrentForm (
+  IN FORM_DISPLAY_ENGINE_STATEMENT  *Statement
+  )
+{
+  if (Statement == NULL) {
+    return FALSE;
+  }
+
+  return FindStatementByOpCode (Statement->OpCode) == Statement;
 }
 
 /**
@@ -368,14 +437,7 @@ OnStatementClicked (
     return;
   }
 
-  mSession.UserInput->SelectedStatement = Ctx->Statement;
-  CopyMem (
-    &mSession.UserInput->InputValue,
-    &Ctx->Statement->CurrentValue,
-    sizeof (EFI_HII_VALUE)
-    );
-  mSession.UserInput->Action = 0;
-  mSession.ExitRequested     = TRUE;
+  RequestUserExit (0, 0, Ctx->Statement);
 }
 
 /**
@@ -452,103 +514,6 @@ OnKeyboardCancel (
   (VOID)Event;
   lv_obj_add_flag (mSession.OnScreenKb, LV_OBJ_FLAG_HIDDEN);
   lv_keyboard_set_textarea (mSession.OnScreenKb, NULL);
-}
-
-/**
-  String textarea commit -- fires on LV_EVENT_READY (Enter key).
-  Reads the typed UTF-8 text, converts to UTF-16, fills InputValue.Buffer,
-  and registers a new HII string so SetupBrowserDxe can persist the value.
-**/
-STATIC
-VOID
-OnStringReady (
-  lv_event_t  *Event
-  )
-{
-  LVGL_STATEMENT_CONTEXT  *Ctx;
-  lv_obj_t                *Ta;
-  CONST CHAR8             *Utf8Text;
-  CHAR16                  *Str16;
-  CHAR16                  *PoolBuf;
-  UINTN                   SrcLen;
-  UINTN                   BufBytes;
-  UINTN                   MaxChars;
-  UINTN                   CopyChars;
-  UINTN                   Idx;
-  EFI_IFR_STRING          *StringOp;
-  EFI_STRING_ID           NewStringId;
-
-  Ctx = (LVGL_STATEMENT_CONTEXT *)lv_event_get_user_data (Event);
-  if ((Ctx == NULL) || (mSession.UserInput == NULL)) {
-    return;
-  }
-
-  Ta       = lv_event_get_target_obj (Event);
-  Utf8Text = lv_textarea_get_text (Ta);
-  if (Utf8Text == NULL) {
-    Utf8Text = "";
-  }
-
-  SrcLen = AsciiStrLen (Utf8Text);
-  Str16  = AllocateZeroPool ((SrcLen + 1) * sizeof (CHAR16));
-  if (Str16 == NULL) {
-    return;
-  }
-
-  for (Idx = 0; Idx < SrcLen; Idx++) {
-    Str16[Idx] = (CHAR16)(UINT8)Utf8Text[Idx];
-  }
-
-  Str16[SrcLen] = L'\0';
-
-  //
-  // SetupBrowserDxe Presentation.c does:
-  //   CopyMem (Statement->BufferValue, InputValue.Buffer, InputValue.BufferLen);
-  //   FreePool (InputValue.Buffer);
-  // so Buffer must be a real pool allocation sized to the field's StorageWidth,
-  // which SetupBrowser copies into CurrentValue.BufferLen when building the
-  // display statement. Fall back to EFI_IFR_STRING.MaxSize if BufferLen is 0.
-  //
-  BufBytes = Ctx->Statement->CurrentValue.BufferLen;
-  if (BufBytes == 0) {
-    StringOp = (EFI_IFR_STRING *)Ctx->Statement->OpCode;
-    BufBytes  = (UINTN)StringOp->MaxSize * sizeof (CHAR16);
-  }
-
-  if (BufBytes < sizeof (CHAR16)) {
-    FreePool (Str16);
-    return;
-  }
-
-  PoolBuf = AllocateZeroPool (BufBytes);
-  if (PoolBuf == NULL) {
-    FreePool (Str16);
-    return;
-  }
-
-  MaxChars  = (BufBytes / sizeof (CHAR16)) - 1;
-  CopyChars = (SrcLen < MaxChars) ? SrcLen : MaxChars;
-  CopyMem (PoolBuf, Str16, CopyChars * sizeof (CHAR16));
-
-  NewStringId = HiiSetString (mSession.FormData->HiiHandle, 0, Str16, NULL);
-  FreePool (Str16);
-  if (NewStringId == 0) {
-    FreePool (PoolBuf);
-    return;
-  }
-
-  if (!IsStatementInCurrentForm (Ctx->Statement)) {
-    FreePool (PoolBuf);
-    return;
-  }
-
-  mSession.UserInput->SelectedStatement       = Ctx->Statement;
-  mSession.UserInput->InputValue.Type         = EFI_IFR_TYPE_STRING;
-  mSession.UserInput->InputValue.Buffer       = (UINT8 *)PoolBuf;
-  mSession.UserInput->InputValue.BufferLen    = (UINT16)BufBytes;
-  mSession.UserInput->InputValue.Value.string = NewStringId;
-  mSession.UserInput->Action                  = 0;
-  mSession.ExitRequested                      = TRUE;
 }
 
 /**
@@ -1039,10 +1004,7 @@ HandleFunctionKey (
           ShowPopup (mSession.Group, Title, Label, HotKey->Action, FALSE);
         }
       } else {
-        mSession.UserInput->Action            = HotKey->Action;
-        mSession.UserInput->DefaultId         = HotKey->DefaultId;
-        mSession.UserInput->SelectedStatement = NULL;
-        mSession.ExitRequested                = TRUE;
+        RequestUserExit (HotKey->Action, HotKey->DefaultId, NULL);
       }
 
       return TRUE;
@@ -1053,10 +1015,8 @@ HandleFunctionKey (
 }
 
 /**
-  Indev-level ESC fallback -- LVGL only routes LV_EVENT_KEY to a focused widget,
-  so forms with no focusable items (e.g. an empty Driver Health Manager form)
-  would eat ESC. This handler runs on every keypress the indev produces, and
-  handles ESC whenever OnNavKey wouldn't fire because nothing is focused.
+  Indev-level key handler -- UP/DOWN/Tab navigation (including grayed rows)
+  and ESC when nothing enabled is focused.
 **/
 STATIC
 VOID
@@ -1066,8 +1026,10 @@ OnIndevFallbackKey (
 {
   lv_indev_t  *Indev;
   lv_key_t    Key;
-
-  lv_obj_t  *Focused;
+  lv_obj_t    *Focused;
+  BOOLEAN     Forward;
+  UINTN       Found;
+  UINTN       Idx;
 
   Indev = lv_indev_active ();
   Key   = lv_indev_get_key (Indev);
@@ -1081,25 +1043,24 @@ OnIndevFallbackKey (
 
   Focused = (mSession.Group != NULL) ? lv_group_get_focused (mSession.Group) : NULL;
 
-  //
-  // UP/DOWN nav is centralized here so it works uniformly for enabled and
-  // disabled (grayed-out) focused widgets. lv_group_focus_next/prev would
-  // skip disabled widgets; we walk our own ordered list instead.
-  //
-  if ((Key == LV_KEY_UP) || (Key == LV_KEY_DOWN)) {
+  Forward = (Key == LV_KEY_DOWN) || (Key == LV_KEY_NEXT);
+  if ((Key == LV_KEY_UP) || (Key == LV_KEY_DOWN) ||
+      (Key == LV_KEY_NEXT) || (Key == LV_KEY_PREV))
+  {
     //
-    // Special case: a ONE_OF dropdown that is currently in keyboard-editing
-    // mode (entered via ENTER) cycles its selection LOCALLY -- no commit, no
-    // form rebuild.  Commit is deferred to the ENTER-confirm or leave paths
-    // in OnNavKey / OnDropdownDefocused.
+    // ONE_OF dropdown keyboard-edit: UP/DOWN cycles options locally -- no
+    // commit, no form rebuild. Commit is deferred to ENTER / leave paths.
     //
-    if ((Focused != NULL) &&
+    if (((Key == LV_KEY_UP) || (Key == LV_KEY_DOWN)) &&
+        (Focused != NULL) &&
         lv_obj_check_type (Focused, &lv_dropdown_class) &&
         lv_group_get_editing (mSession.Group))
     {
       UINT32  Count = (UINT32)lv_dropdown_get_option_count (Focused);
+
       if (Count > 0) {
         UINT32  Sel = (UINT32)lv_dropdown_get_selected (Focused);
+
         if (Key == LV_KEY_DOWN) {
           Sel = (Sel + 1) % Count;
         } else {
@@ -1107,35 +1068,48 @@ OnIndevFallbackKey (
         }
 
         lv_dropdown_set_selected (Focused, Sel);
-        // Do NOT send LV_EVENT_VALUE_CHANGED here -- commit is deferred.
       }
 
       return;
     }
 
-    if (mNavCount > 0) {
-      UINTN  Idx   = 0;
-      UINTN  Found = mNavCount;
-      for (Idx = 0; Idx < mNavCount; Idx++) {
-        if (mNavList[Idx] == Focused) {
-          Found = Idx;
-          break;
-        }
-      }
-
-      if (Found == mNavCount) {
-        Found = (Key == LV_KEY_DOWN) ? (mNavCount - 1) : 0;
-      }
-
-      if (Key == LV_KEY_DOWN) {
-        Idx = (Found + 1) % mNavCount;
-      } else {
-        Idx = (Found == 0) ? (mNavCount - 1) : (Found - 1);
-      }
-
-      lv_group_focus_obj (mNavList[Idx]);
+    if (mNavCount == 0) {
+      return;
     }
 
+    Found = mNavCount;
+    for (Idx = 0; Idx < mNavCount; Idx++) {
+      if (mNavList[Idx] == Focused) {
+        Found = Idx;
+        break;
+      }
+    }
+
+    if (Found == mNavCount) {
+      Found = Forward ? (mNavCount - 1) : 0;
+    }
+
+    if (Forward) {
+      Idx = (Found + 1) % mNavCount;
+    } else {
+      Idx = (Found == 0) ? (mNavCount - 1) : (Found - 1);
+    }
+
+    //
+    // Commit the field being left so multi-field edits survive navigation.
+    // After rebuild, focus is restored to Idx (the destination).
+    //
+    if (TryCommitFocusedThenNav (Idx)) {
+      lv_event_stop_processing (Event);
+      return;
+    }
+
+    lv_group_focus_obj (mNavList[Idx]);
+    //
+    // Stop so LVGL's group handler doesn't also advance on NEXT/PREV (Tab),
+    // which would skip an extra field.
+    //
+    lv_event_stop_processing (Event);
     return;
   }
 
@@ -1154,9 +1128,7 @@ OnIndevFallbackKey (
     // accidentally drop out of setup.
     //
     if (!IsFrontPageForm ()) {
-      mSession.UserInput->Action            = BROWSER_ACTION_FORM_EXIT;
-      mSession.UserInput->SelectedStatement = NULL;
-      mSession.ExitRequested                = TRUE;
+      RequestUserExit (BROWSER_ACTION_FORM_EXIT, 0, NULL);
     }
 
     return;
@@ -1258,51 +1230,73 @@ ClampU64 (
   return Value;
 }
 
+STATIC
+UINT64
+GetStatementNumericValue (
+  IN FORM_DISPLAY_ENGINE_STATEMENT  *Statement,
+  IN EFI_IFR_NUMERIC                *NumOp
+  )
+{
+  switch (NumOp->Flags & EFI_IFR_NUMERIC_SIZE) {
+    case EFI_IFR_NUMERIC_SIZE_1:
+      return Statement->CurrentValue.Value.u8;
+    case EFI_IFR_NUMERIC_SIZE_2:
+      return Statement->CurrentValue.Value.u16;
+    case EFI_IFR_NUMERIC_SIZE_4:
+      return Statement->CurrentValue.Value.u32;
+    default:
+      return Statement->CurrentValue.Value.u64;
+  }
+}
+
 /**
-  Numeric textarea commit -- fires when the user presses ENTER on a one_line
-  textarea (LV_EVENT_READY). Parses the typed text, clamps to the IFR
-  Min/Max range, and delivers the new value to the browser.
+  Register an editable field for commit-on-nav / commit-on-exit.
 **/
 STATIC
 VOID
-OnNumericReady (
-  lv_event_t  *Event
+RegisterEditEntry (
+  IN LVGL_EDIT_KIND  Kind,
+  IN VOID            *Ctx
   )
 {
-  LVGL_STATEMENT_CONTEXT  *Ctx;
-  lv_obj_t                *Ta;
-  CONST CHAR8             *Text;
-  UINT64                  Value;
-  UINT64                  MinVal;
-  UINT64                  MaxVal;
-  EFI_IFR_NUMERIC         *NumOp;
-
-  Ctx = (LVGL_STATEMENT_CONTEXT *)lv_event_get_user_data (Event);
-  if ((Ctx == NULL) || (mSession.UserInput == NULL)) {
+  if (Ctx == NULL) {
     return;
   }
 
-  if (!IsStatementInCurrentForm (Ctx->Statement)) {
+  if ((Kind == LVGL_EDIT_NUMERIC) || (Kind == LVGL_EDIT_STRING)) {
+    if (((LVGL_STATEMENT_CONTEXT *)Ctx)->Widget == NULL) {
+      return;
+    }
+  }
+
+  if (mEditRegistryCount >= LVGL_EDIT_MAX) {
+    DEBUG ((DEBUG_WARN, "LvglRenderer: edit registry full, skipping field\n"));
     return;
   }
 
-  Ta    = lv_event_get_target_obj (Event);
-  Text  = lv_textarea_get_text (Ta);
-  Value = AsciiDecimalToUint64 (Text);
-
-  NumOp = (EFI_IFR_NUMERIC *)Ctx->Statement->OpCode;
-  GetNumericRange (NumOp, &MinVal, &MaxVal);
-
-  if (Value < MinVal) {
-    Value = MinVal;
+  mEditRegistry[mEditRegistryCount].Kind = Kind;
+  if (Kind == LVGL_EDIT_DATETIME) {
+    mEditRegistry[mEditRegistryCount].u.DateTime = (LVGL_DATETIME_CTX *)Ctx;
+  } else {
+    mEditRegistry[mEditRegistryCount].u.TextCtx = (LVGL_STATEMENT_CONTEXT *)Ctx;
   }
 
-  if (Value > MaxVal) {
-    Value = MaxVal;
-  }
+  mEditRegistryCount++;
+}
 
-  mSession.UserInput->SelectedStatement = Ctx->Statement;
-  mSession.UserInput->InputValue.Type   = Ctx->Statement->CurrentValue.Type;
+STATIC
+VOID
+SetNumericUserInput (
+  IN FORM_DISPLAY_ENGINE_STATEMENT  *Statement,
+  IN UINT64                         Value
+  )
+{
+  EFI_IFR_NUMERIC  *NumOp;
+
+  NumOp = (EFI_IFR_NUMERIC *)Statement->OpCode;
+
+  mSession.UserInput->SelectedStatement = Statement;
+  mSession.UserInput->InputValue.Type   = Statement->CurrentValue.Type;
 
   switch (NumOp->Flags & EFI_IFR_NUMERIC_SIZE) {
     case EFI_IFR_NUMERIC_SIZE_1:
@@ -1320,52 +1314,243 @@ OnNumericReady (
   }
 
   mSession.UserInput->Action = 0;
-  mSession.ExitRequested     = TRUE;
 }
 
-//
-// Per-question context for EFI_IFR_DATE / EFI_IFR_TIME rows. A single context
-// is shared by the three sub-field textareas; committing reads all three.
-//
-typedef struct {
-  FORM_DISPLAY_ENGINE_STATEMENT  *Statement;
-  BOOLEAN                        IsDate;    // TRUE = date (M/D/Y), FALSE = time (H:M:S)
-  lv_obj_t                       *Field0;   // month  / hour
-  lv_obj_t                       *Field1;   // day    / minute
-  lv_obj_t                       *Field2;   // year   / second
-} LVGL_DATETIME_CTX;
-
 /**
-  Date/Time sub-field commit -- fires when ENTER is pressed on any of the
-  three one-line textareas (LV_EVENT_READY). Reads all three fields, clamps
-  each to its valid range, and delivers a full EFI_IFR_TYPE_DATE/TIME value.
-
-  The whole CurrentValue is copied first (preserving Type) then the three
-  components are overwritten, mirroring DisplayEngineDxe's InputHandler.c.
+  Return TRUE when the string/password textarea differs from the statement.
 **/
 STATIC
-VOID
-OnDateTimeReady (
-  lv_event_t  *Event
+BOOLEAN
+IsStringTextDirty (
+  IN LVGL_STATEMENT_CONTEXT  *Ctx,
+  IN CONST CHAR8             *Utf8Text
   )
 {
-  LVGL_DATETIME_CTX  *Ctx;
-  UINT64             V0;
-  UINT64             V1;
-  UINT64             V2;
+  CHAR16  *CurStr16;
+  CHAR8   *CurUtf8;
+  BOOLEAN Dirty;
+  UINTN   Len;
 
-  Ctx = (LVGL_DATETIME_CTX *)lv_event_get_user_data (Event);
-  if ((Ctx == NULL) || (mSession.UserInput == NULL)) {
-    return;
+  Len = AsciiStrLen (Utf8Text);
+  if ((Ctx->Statement->OpCode->OpCode == EFI_IFR_PASSWORD_OP) ||
+      (Ctx->Statement->CurrentValue.Value.string == 0))
+  {
+    return Len > 0;
+  }
+
+  CurStr16 = HiiGetString (
+               Ctx->HiiHandle,
+               Ctx->Statement->CurrentValue.Value.string,
+               NULL
+               );
+  if (CurStr16 == NULL) {
+    return Len > 0;
+  }
+
+  CurUtf8 = Ucs2ToUtf8 (CurStr16);
+  FreePool (CurStr16);
+  if (CurUtf8 == NULL) {
+    return Len > 0;
+  }
+
+  Dirty = (AsciiStrCmp (Utf8Text, CurUtf8) != 0);
+  FreePool (CurUtf8);
+  return Dirty;
+}
+
+/**
+  Stage a numeric USER_INPUT from Ctx->Widget.
+
+  @param[in] Force  TRUE to always stage (Enter). FALSE only if dirty.
+**/
+STATIC
+BOOLEAN
+StageNumericUserInput (
+  IN LVGL_STATEMENT_CONTEXT  *Ctx,
+  IN BOOLEAN                 Force
+  )
+{
+  EFI_IFR_NUMERIC  *NumOp;
+  UINT64           Value;
+  UINT64           MinVal;
+  UINT64           MaxVal;
+  lv_obj_t         *Ta;
+
+  if ((Ctx == NULL) || (Ctx->Widget == NULL) ||
+      (mSession.UserInput == NULL) || mSession.ExitRequested)
+  {
+    return FALSE;
   }
 
   if (!IsStatementInCurrentForm (Ctx->Statement)) {
-    return;
+    return FALSE;
   }
 
-  V0 = AsciiDecimalToUint64 (lv_textarea_get_text (Ctx->Field0));
-  V1 = AsciiDecimalToUint64 (lv_textarea_get_text (Ctx->Field1));
-  V2 = AsciiDecimalToUint64 (lv_textarea_get_text (Ctx->Field2));
+  Ta    = Ctx->Widget;
+  NumOp = (EFI_IFR_NUMERIC *)Ctx->Statement->OpCode;
+  Value = AsciiDecimalToUint64 (lv_textarea_get_text (Ta));
+  GetNumericRange (NumOp, &MinVal, &MaxVal);
+  Value = ClampU64 (Value, MinVal, MaxVal);
+
+  if (!Force && (Value == GetStatementNumericValue (Ctx->Statement, NumOp))) {
+    return FALSE;
+  }
+
+  SetNumericUserInput (Ctx->Statement, Value);
+  mSession.ExitRequested = TRUE;
+  return TRUE;
+}
+
+STATIC
+BOOLEAN
+StageStringUserInput (
+  IN LVGL_STATEMENT_CONTEXT  *Ctx,
+  IN BOOLEAN                 Force
+  )
+{
+  CONST CHAR8     *Utf8Text;
+  CHAR16          *Str16;
+  CHAR16          *PoolBuf;
+  UINTN           SrcLen;
+  UINTN           BufBytes;
+  UINTN           MaxChars;
+  UINTN           CopyChars;
+  UINTN           Idx;
+  EFI_IFR_STRING  *StringOp;
+  EFI_STRING_ID   NewStringId;
+  lv_obj_t        *Ta;
+
+  if ((Ctx == NULL) || (Ctx->Widget == NULL) ||
+      (mSession.UserInput == NULL) || mSession.ExitRequested)
+  {
+    return FALSE;
+  }
+
+  if (!IsStatementInCurrentForm (Ctx->Statement)) {
+    return FALSE;
+  }
+
+  Ta = Ctx->Widget;
+  Utf8Text = lv_textarea_get_text (Ta);
+  if (Utf8Text == NULL) {
+    Utf8Text = "";
+  }
+
+  SrcLen = AsciiStrLen (Utf8Text);
+
+  if (!Force && !IsStringTextDirty (Ctx, Utf8Text)) {
+    return FALSE;
+  }
+
+  Str16 = AllocateZeroPool ((SrcLen + 1) * sizeof (CHAR16));
+  if (Str16 == NULL) {
+    return FALSE;
+  }
+
+  for (Idx = 0; Idx < SrcLen; Idx++) {
+    Str16[Idx] = (CHAR16)(UINT8)Utf8Text[Idx];
+  }
+
+  Str16[SrcLen] = L'\0';
+
+  BufBytes = Ctx->Statement->CurrentValue.BufferLen;
+  if (BufBytes == 0) {
+    StringOp = (EFI_IFR_STRING *)Ctx->Statement->OpCode;
+    BufBytes = (UINTN)StringOp->MaxSize * sizeof (CHAR16);
+  }
+
+  if (BufBytes < sizeof (CHAR16)) {
+    FreePool (Str16);
+    return FALSE;
+  }
+
+  PoolBuf = AllocateZeroPool (BufBytes);
+  if (PoolBuf == NULL) {
+    FreePool (Str16);
+    return FALSE;
+  }
+
+  MaxChars  = (BufBytes / sizeof (CHAR16)) - 1;
+  CopyChars = (SrcLen < MaxChars) ? SrcLen : MaxChars;
+  CopyMem (PoolBuf, Str16, CopyChars * sizeof (CHAR16));
+
+  NewStringId = HiiSetString (mSession.FormData->HiiHandle, 0, Str16, NULL);
+  FreePool (Str16);
+  if (NewStringId == 0) {
+    FreePool (PoolBuf);
+    return FALSE;
+  }
+
+  mSession.UserInput->SelectedStatement       = Ctx->Statement;
+  mSession.UserInput->InputValue.Type         = EFI_IFR_TYPE_STRING;
+  mSession.UserInput->InputValue.Buffer       = (UINT8 *)PoolBuf;
+  mSession.UserInput->InputValue.BufferLen    = (UINT16)BufBytes;
+  mSession.UserInput->InputValue.Value.string = NewStringId;
+  mSession.UserInput->Action                  = 0;
+  mSession.ExitRequested                      = TRUE;
+  return TRUE;
+}
+
+STATIC
+VOID
+ReadDateTimeFields (
+  IN  LVGL_DATETIME_CTX  *Ctx,
+  OUT UINT64             *V0,
+  OUT UINT64             *V1,
+  OUT UINT64             *V2
+  )
+{
+  *V0 = AsciiDecimalToUint64 (lv_textarea_get_text (Ctx->Field0));
+  *V1 = AsciiDecimalToUint64 (lv_textarea_get_text (Ctx->Field1));
+  *V2 = AsciiDecimalToUint64 (lv_textarea_get_text (Ctx->Field2));
+
+  if (Ctx->IsDate) {
+    *V0 = ClampU64 (*V0, 1, 12);
+    *V1 = ClampU64 (*V1, 1, 31);
+    *V2 = ClampU64 (*V2, 1998, 2099);
+  } else {
+    *V0 = ClampU64 (*V0, 0, 23);
+    *V1 = ClampU64 (*V1, 0, 59);
+    *V2 = ClampU64 (*V2, 0, 59);
+  }
+}
+
+STATIC
+BOOLEAN
+StageDateTimeUserInput (
+  IN LVGL_DATETIME_CTX  *Ctx,
+  IN BOOLEAN            Force
+  )
+{
+  UINT64  V0;
+  UINT64  V1;
+  UINT64  V2;
+
+  if ((Ctx == NULL) || (mSession.UserInput == NULL) || mSession.ExitRequested) {
+    return FALSE;
+  }
+
+  if (!IsStatementInCurrentForm (Ctx->Statement)) {
+    return FALSE;
+  }
+
+  ReadDateTimeFields (Ctx, &V0, &V1, &V2);
+
+  if (!Force) {
+    if (Ctx->IsDate) {
+      if ((V0 == Ctx->Statement->CurrentValue.Value.date.Month) &&
+          (V1 == Ctx->Statement->CurrentValue.Value.date.Day) &&
+          (V2 == Ctx->Statement->CurrentValue.Value.date.Year))
+      {
+        return FALSE;
+      }
+    } else if ((V0 == Ctx->Statement->CurrentValue.Value.time.Hour) &&
+               (V1 == Ctx->Statement->CurrentValue.Value.time.Minute) &&
+               (V2 == Ctx->Statement->CurrentValue.Value.time.Second))
+    {
+      return FALSE;
+    }
+  }
 
   CopyMem (
     &mSession.UserInput->InputValue,
@@ -1374,18 +1559,231 @@ OnDateTimeReady (
     );
 
   if (Ctx->IsDate) {
-    mSession.UserInput->InputValue.Value.date.Month = (UINT8)ClampU64 (V0, 1, 12);
-    mSession.UserInput->InputValue.Value.date.Day   = (UINT8)ClampU64 (V1, 1, 31);
-    mSession.UserInput->InputValue.Value.date.Year  = (UINT16)ClampU64 (V2, 1998, 2099);
+    mSession.UserInput->InputValue.Value.date.Month = (UINT8)V0;
+    mSession.UserInput->InputValue.Value.date.Day   = (UINT8)V1;
+    mSession.UserInput->InputValue.Value.date.Year  = (UINT16)V2;
   } else {
-    mSession.UserInput->InputValue.Value.time.Hour   = (UINT8)ClampU64 (V0, 0, 23);
-    mSession.UserInput->InputValue.Value.time.Minute = (UINT8)ClampU64 (V1, 0, 59);
-    mSession.UserInput->InputValue.Value.time.Second = (UINT8)ClampU64 (V2, 0, 59);
+    mSession.UserInput->InputValue.Value.time.Hour   = (UINT8)V0;
+    mSession.UserInput->InputValue.Value.time.Minute = (UINT8)V1;
+    mSession.UserInput->InputValue.Value.time.Second = (UINT8)V2;
   }
 
   mSession.UserInput->SelectedStatement = Ctx->Statement;
   mSession.UserInput->Action            = 0;
   mSession.ExitRequested                = TRUE;
+  return TRUE;
+}
+
+/**
+  Find the edit registry entry for a focused widget, if any.
+**/
+STATIC
+LVGL_EDIT_ENTRY *
+FindEditEntryForWidget (
+  IN lv_obj_t  *Widget
+  )
+{
+  UINTN            Idx;
+  LVGL_EDIT_ENTRY  *Entry;
+
+  if (Widget == NULL) {
+    return NULL;
+  }
+
+  for (Idx = 0; Idx < mEditRegistryCount; Idx++) {
+    Entry = &mEditRegistry[Idx];
+    if (((Entry->Kind == LVGL_EDIT_NUMERIC) || (Entry->Kind == LVGL_EDIT_STRING)) &&
+        (Entry->u.TextCtx != NULL) &&
+        (Entry->u.TextCtx->Widget == Widget))
+    {
+      return Entry;
+    }
+
+    if ((Entry->Kind == LVGL_EDIT_DATETIME) &&
+        (Entry->u.DateTime != NULL) &&
+        ((Entry->u.DateTime->Field0 == Widget) ||
+         (Entry->u.DateTime->Field1 == Widget) ||
+         (Entry->u.DateTime->Field2 == Widget)))
+    {
+      return Entry;
+    }
+  }
+
+  return NULL;
+}
+
+/**
+  Commit the focused editable field if its LVGL value differs from the statement.
+
+  @retval TRUE   A value was staged and the event loop should exit.
+**/
+STATIC
+BOOLEAN
+CommitFocusedEditIfDirty (
+  VOID
+  )
+{
+  LVGL_EDIT_ENTRY  *Entry;
+  lv_obj_t         *Focused;
+
+  if (mSession.UserInput == NULL) {
+    return FALSE;
+  }
+
+  Focused = (mSession.Group != NULL) ? lv_group_get_focused (mSession.Group) : NULL;
+  Entry   = FindEditEntryForWidget (Focused);
+  if (Entry == NULL) {
+    return FALSE;
+  }
+
+  switch (Entry->Kind) {
+    case LVGL_EDIT_NUMERIC:
+      return StageNumericUserInput (Entry->u.TextCtx, FALSE);
+
+    case LVGL_EDIT_STRING:
+      return StageStringUserInput (Entry->u.TextCtx, FALSE);
+
+    case LVGL_EDIT_DATETIME:
+      return StageDateTimeUserInput (Entry->u.DateTime, FALSE);
+
+    default:
+      return FALSE;
+  }
+}
+
+STATIC
+VOID
+ApplyUserInput (
+  IN UINT32                         Action,
+  IN UINT16                         DefaultId,
+  IN FORM_DISPLAY_ENGINE_STATEMENT  *Statement OPTIONAL
+  )
+{
+  mSession.UserInput->Action    = Action;
+  mSession.UserInput->DefaultId = DefaultId;
+  if (Statement != NULL) {
+    mSession.UserInput->SelectedStatement = Statement;
+    CopyMem (
+      &mSession.UserInput->InputValue,
+      &Statement->CurrentValue,
+      sizeof (EFI_HII_VALUE)
+      );
+  } else {
+    mSession.UserInput->SelectedStatement = NULL;
+  }
+
+  mSession.ExitRequested = TRUE;
+}
+
+/**
+  Commit focused dirty field (if any), then leave / navigate / hotkey.
+**/
+STATIC
+VOID
+RequestUserExit (
+  IN UINT32                         Action,
+  IN UINT16                         DefaultId,
+  IN FORM_DISPLAY_ENGINE_STATEMENT  *Statement OPTIONAL
+  )
+{
+  if (CommitFocusedEditIfDirty ()) {
+    ZeroMem (&mPendingLeave, sizeof (mPendingLeave));
+    mPendingLeave.Active    = TRUE;
+    mPendingLeave.Action    = Action;
+    mPendingLeave.DefaultId = DefaultId;
+    mPendingLeave.OpCode    = (Statement != NULL) ? Statement->OpCode : NULL;
+    return;
+  }
+
+  ApplyUserInput (Action, DefaultId, Statement);
+}
+
+/**
+  Finish deferred leave after a one-shot focused-field commit.
+**/
+STATIC
+BOOLEAN
+CompletePendingLeaveIfReady (
+  VOID
+  )
+{
+  if (!mPendingLeave.Active) {
+    return FALSE;
+  }
+
+  ApplyUserInput (
+    mPendingLeave.Action,
+    mPendingLeave.DefaultId,
+    FindStatementByOpCode (mPendingLeave.OpCode)
+    );
+  ZeroMem (&mPendingLeave, sizeof (mPendingLeave));
+  return TRUE;
+}
+
+/**
+  If the focused field is dirty, commit it and restore focus to @a DestNavIdx
+  after the form rebuilds.
+
+  @retval TRUE   Commit staged; caller should return without moving focus.
+**/
+STATIC
+BOOLEAN
+TryCommitFocusedThenNav (
+  IN UINTN  DestNavIdx
+  )
+{
+  if (!CommitFocusedEditIfDirty ()) {
+    return FALSE;
+  }
+
+  mRestoreFocusNavIdx  = DestNavIdx;
+  mRestoreFocusPending = TRUE;
+  return TRUE;
+}
+
+/**
+  Numeric textarea commit -- fires when the user presses ENTER.
+**/
+STATIC
+VOID
+OnNumericReady (
+  lv_event_t  *Event
+  )
+{
+  LVGL_STATEMENT_CONTEXT  *Ctx;
+
+  Ctx = (LVGL_STATEMENT_CONTEXT *)lv_event_get_user_data (Event);
+  (VOID)StageNumericUserInput (Ctx, TRUE);
+}
+
+/**
+  String textarea commit -- fires when the user presses ENTER.
+**/
+STATIC
+VOID
+OnStringReady (
+  lv_event_t  *Event
+  )
+{
+  LVGL_STATEMENT_CONTEXT  *Ctx;
+
+  Ctx = (LVGL_STATEMENT_CONTEXT *)lv_event_get_user_data (Event);
+  (VOID)StageStringUserInput (Ctx, TRUE);
+}
+
+/**
+  Date/Time sub-field commit -- fires when ENTER is pressed on any field.
+**/
+STATIC
+VOID
+OnDateTimeReady (
+  lv_event_t  *Event
+  )
+{
+  LVGL_DATETIME_CTX  *Ctx;
+
+  Ctx = (LVGL_DATETIME_CTX *)lv_event_get_user_data (Event);
+  (VOID)StageDateTimeUserInput (Ctx, TRUE);
 }
 
 STATIC
@@ -1429,21 +1827,28 @@ OnNavKey (
       return;
     }
 
-    if (Editing) {
+    if (Editing &&
+        (mEditingDropdown != NULL) &&
+        (Focused == mEditingDropdown))
+    {
       //
-      // ESC during dropdown keyboard-edit: revert the selection to the value
-      // that was current when the user pressed ENTER to start editing.
+      // ESC during dropdown keyboard-edit: revert the selection and stay
+      // on the form. Text fields below fall through to RequestUserExit so
+      // a single ESC flushes the edit and leaves.
       //
-      if ((mEditingDropdown != NULL) && (Focused == mEditingDropdown)) {
-        lv_dropdown_set_selected (mEditingDropdown, mEditingDropdownOrigSel);
-        mEditingDropdown = NULL;
-      }
-
+      lv_dropdown_set_selected (mEditingDropdown, mEditingDropdownOrigSel);
+      mEditingDropdown = NULL;
       lv_group_set_editing (mSession.Group, false);
-    } else if (!IsFrontPageForm ()) {
-      mSession.UserInput->Action            = BROWSER_ACTION_FORM_EXIT;
-      mSession.UserInput->SelectedStatement = NULL;
-      mSession.ExitRequested                = TRUE;
+      lv_event_stop_processing (Event);
+      return;
+    }
+
+    if (Editing) {
+      lv_group_set_editing (mSession.Group, false);
+    }
+
+    if (!IsFrontPageForm ()) {
+      RequestUserExit (BROWSER_ACTION_FORM_EXIT, 0, NULL);
     }
 
     lv_event_stop_processing (Event);
@@ -1474,7 +1879,9 @@ OnNavKey (
         return;
       }
 
-      if ((Key == LV_KEY_UP) || (Key == LV_KEY_DOWN)) {
+      if ((Key == LV_KEY_UP) || (Key == LV_KEY_DOWN) ||
+          (Key == LV_KEY_NEXT) || (Key == LV_KEY_PREV))
+      {
         //
         // OnIndevFallbackKey already cycled the selection; stop processing
         // here so the LVGL dropdown class handler doesn't also advance/open.
@@ -1482,6 +1889,17 @@ OnNavKey (
         lv_event_stop_processing (Event);
         return;
       }
+    }
+
+    if ((Key == LV_KEY_UP) || (Key == LV_KEY_DOWN) ||
+        (Key == LV_KEY_NEXT) || (Key == LV_KEY_PREV))
+    {
+      //
+      // Text fields: OnIndevFallbackKey already commits+navigates. Stop so
+      // the textarea class doesn't treat arrows as caret motion instead.
+      //
+      lv_event_stop_processing (Event);
+      return;
     }
 
     //
@@ -1493,12 +1911,15 @@ OnNavKey (
 
   (void)Ctx;
 
-  if ((Key == LV_KEY_UP) || (Key == LV_KEY_DOWN)) {
+  if ((Key == LV_KEY_UP) || (Key == LV_KEY_DOWN) ||
+      (Key == LV_KEY_NEXT) || (Key == LV_KEY_PREV))
+  {
     //
-    // UP/DOWN is handled exclusively by OnIndevFallbackKey so we don't
+    // UP/DOWN/Tab are handled exclusively by OnIndevFallbackKey so we don't
     // double-advance. LVGL fires LV_EVENT_KEY on the indev BEFORE
-    // routing to the focused widget; the indev handler advances focus,
-    // and then if we also advanced here we would skip a row.
+    // routing to the focused widget; the indev handler advances focus
+    // (and may commit a dirty field), and then if we also advanced here we
+    // would skip a row.
     //
     lv_event_stop_processing (Event);
     return;
@@ -2090,8 +2511,7 @@ CreateNumericWidget (
   }
 
   //
-  // A one-line textarea accepting only digits. Pressing ENTER fires
-  // LV_EVENT_READY, which OnNumericReady uses to commit.
+  // Digit-only one-line textarea. ENTER, Tab/arrows, and ESC commit when dirty.
   //
   Ta = lv_textarea_create (Row);
   lv_textarea_set_one_line (Ta, true);
@@ -2114,6 +2534,7 @@ CreateNumericWidget (
     Ctx->Statement = Statement;
     Ctx->Widget    = Ta;
     lv_obj_add_event_cb (Ta, OnNumericReady, LV_EVENT_READY, Ctx);
+    RegisterEditEntry (LVGL_EDIT_NUMERIC, Ctx);
   }
 
   //
@@ -2281,6 +2702,8 @@ CreateDateTimeWidget (
   BindRowHover (DtCtx->Field0, Row, HelpCtx);
   BindRowHover (DtCtx->Field1, Row, HelpCtx);
   BindRowHover (DtCtx->Field2, Row, HelpCtx);
+
+  RegisterEditEntry (LVGL_EDIT_DATETIME, DtCtx);
 
   if (Text != NULL) {
     FreePool (Text);
@@ -2712,6 +3135,7 @@ CreateStringWidget (
     Ctx->Widget    = Ta;
     Ctx->HiiHandle = HiiHandle;
     lv_obj_add_event_cb (Ta, OnStringReady, LV_EVENT_READY, Ctx);
+    RegisterEditEntry (LVGL_EDIT_STRING, Ctx);
   }
 
   //
@@ -2941,6 +3365,7 @@ LvglRenderForm (
   mSession.UserInput      = UserInputData;
   mSession.ExitRequested  = FALSE;
   mNavCount               = 0;
+  mEditRegistryCount      = 0;
   mEditingDropdown        = NULL;
 
   //
@@ -3035,12 +3460,20 @@ LvglRenderForm (
   lv_screen_load (mSession.Screen);
 
   //
-  // Restore the selection the browser asked to highlight
+  // Restore keyboard focus. Prefer the destination field after a nav-time
+  // commit; otherwise use the browser highlight.
   //
-  if (FormData->HighLightedStatement != NULL) {
+  lv_obj_update_layout (mSession.Screen);
+  if (mRestoreFocusPending) {
+    if (mRestoreFocusNavIdx < mNavCount) {
+      lv_group_focus_obj (mNavList[mRestoreFocusNavIdx]);
+      lv_obj_scroll_to_view (mNavList[mRestoreFocusNavIdx], LV_ANIM_OFF);
+    }
+
+    mRestoreFocusPending = FALSE;
+  } else if (FormData->HighLightedStatement != NULL) {
     UINTN  FocusIdx;
 
-    lv_obj_update_layout (mSession.Screen);
     for (FocusIdx = 0; FocusIdx < mNavCount; FocusIdx++) {
       if (mNavStatement[FocusIdx] == FormData->HighLightedStatement) {
         lv_group_focus_obj (mNavList[FocusIdx]);
@@ -3048,6 +3481,14 @@ LvglRenderForm (
         break;
       }
     }
+  }
+
+  //
+  // Finish a deferred leave after flushing the focused field on ESC/back.
+  //
+  if (CompletePendingLeaveIfReady ()) {
+    lv_uefi_keypad_drain ();
+    return EFI_SUCCESS;
   }
 
   //
@@ -3067,10 +3508,7 @@ LvglRenderForm (
     //
     if ((mPopupResult != LVGL_POPUP_PENDING) && (mPopupOverlay == NULL)) {
       if (mPopupResult != BROWSER_ACTION_NONE) {
-        mSession.UserInput->Action            = mPopupResult;
-        mSession.UserInput->DefaultId         = mPendingDefaultId;
-        mSession.UserInput->SelectedStatement = NULL;
-        mSession.ExitRequested                = TRUE;
+        RequestUserExit (mPopupResult, mPendingDefaultId, NULL);
       }
 
       mPopupResult = LVGL_POPUP_PENDING;
