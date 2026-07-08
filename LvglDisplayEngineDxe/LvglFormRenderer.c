@@ -32,6 +32,13 @@ STATIC FORM_DISPLAY_ENGINE_STATEMENT  *mNavStatement[LVGL_NAV_MAX];
 STATIC UINTN                          mNavCount = 0;
 
 //
+// Scrollable form rows panel from AptioBuildChrome(). Used to restore the top
+// of the view (banner / labels above the first controls) when focus returns
+// to rows in the upper portion of the form.
+//
+STATIC lv_obj_t  *mContentPanel = NULL;
+
+//
 // Editable field registry -- commit dirty values when leaving a field via
 // Tab/arrows or when exiting the form (ESC), not only on Enter.
 //
@@ -2019,6 +2026,85 @@ OnHoverUpdateHelp (
   }
 }
 
+/**
+  Return the content-panel child that should drive scroll positioning for a
+  nav widget (the row container when the widget is nested inside one).
+**/
+STATIC
+lv_obj_t *
+NavScrollTarget (
+  IN lv_obj_t  *NavWidget
+  )
+{
+  lv_obj_t  *Obj;
+
+  if (mContentPanel == NULL) {
+    return NavWidget;
+  }
+
+  Obj = NavWidget;
+  while ((Obj != NULL) &&
+         (lv_obj_get_parent (Obj) != NULL) &&
+         (lv_obj_get_parent (Obj) != mContentPanel))
+  {
+    Obj = lv_obj_get_parent (Obj);
+  }
+
+  if ((Obj != NULL) && (lv_obj_get_parent (Obj) == mContentPanel)) {
+    return Obj;
+  }
+
+  return NavWidget;
+}
+
+/**
+  Scroll a nav row into view. When the row fits entirely in the viewport from
+  scroll offset zero, prefer showing content from the top so banner lines and
+  other labels above the first controls stay visible after navigating back up.
+**/
+STATIC
+VOID
+ScrollNavIntoView (
+  IN lv_obj_t  *NavWidget
+  )
+{
+  lv_obj_t  *Target;
+  int32_t   ItemY;
+  int32_t   ItemH;
+  int32_t   ViewH;
+
+  Target = NavScrollTarget (NavWidget);
+
+  if (mContentPanel == NULL) {
+    lv_obj_scroll_to_view (Target, LV_ANIM_OFF);
+    return;
+  }
+
+  lv_obj_update_layout (mContentPanel);
+
+  ItemY = lv_obj_get_y (Target);
+  ItemH = lv_obj_get_height (Target);
+  ViewH = lv_obj_get_height (mContentPanel);
+  ViewH -= lv_obj_get_style_pad_top (mContentPanel, LV_PART_MAIN);
+  ViewH -= lv_obj_get_style_pad_bottom (mContentPanel, LV_PART_MAIN);
+
+  if ((ItemY >= 0) && (ItemY + ItemH <= ViewH)) {
+    lv_obj_scroll_to_y (mContentPanel, 0, LV_ANIM_OFF);
+    return;
+  }
+
+  lv_obj_scroll_to_view (Target, LV_ANIM_OFF);
+}
+
+STATIC
+VOID
+OnNavFocused (
+  lv_event_t  *Event
+  )
+{
+  ScrollNavIntoView (lv_event_get_target_obj (Event));
+}
+
 STATIC
 VOID
 AddToNavGroup (
@@ -2028,6 +2114,8 @@ AddToNavGroup (
   )
 {
   lv_group_add_obj (Group, Widget);
+  lv_obj_remove_flag (Widget, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+  lv_obj_add_event_cb (Widget, OnNavFocused, LV_EVENT_FOCUSED, NULL);
   lv_obj_add_event_cb (Widget, OnNavKey, LV_EVENT_KEY | LV_EVENT_PREPROCESS, Ctx);
   if (Ctx != NULL) {
     lv_obj_add_event_cb (Widget, OnFocusUpdateHelp, LV_EVENT_FOCUSED,   Ctx);
@@ -3397,6 +3485,7 @@ LvglRenderForm (
   //
   mSession.Screen = lv_obj_create (NULL);
   ContentPanel    = AptioBuildChrome (mSession.Screen, FormData);
+  mContentPanel   = ContentPanel;
 
   //
   // Create a navigation group and bind keyboard input devices.
@@ -3476,7 +3565,6 @@ LvglRenderForm (
   if (mRestoreFocusPending) {
     if (mRestoreFocusNavIdx < mNavCount) {
       lv_group_focus_obj (mNavList[mRestoreFocusNavIdx]);
-      lv_obj_scroll_to_view (mNavList[mRestoreFocusNavIdx], LV_ANIM_OFF);
     }
 
     mRestoreFocusPending = FALSE;
@@ -3486,7 +3574,6 @@ LvglRenderForm (
     for (FocusIdx = 0; FocusIdx < mNavCount; FocusIdx++) {
       if (mNavStatement[FocusIdx] == FormData->HighLightedStatement) {
         lv_group_focus_obj (mNavList[FocusIdx]);
-        lv_obj_scroll_to_view (mNavList[FocusIdx], LV_ANIM_OFF);
         break;
       }
     }
@@ -3893,6 +3980,8 @@ LvglRendererCleanup (
     lv_obj_delete (mSession.Screen);
     mSession.Screen = NULL;
   }
+
+  mContentPanel = NULL;
 
   //
   // Note: LVGL_STATEMENT_CONTEXT objects were allocated with AllocateZeroPool
