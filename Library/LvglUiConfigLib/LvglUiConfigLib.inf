@@ -36,3 +36,4 @@
   gLvglPkgTokenSpaceGuid.PcdLvglCenteredFrameHeightPct
   gLvglPkgTokenSpaceGuid.PcdLvglCenteredFrameAspectNum
   gLvglPkgTokenSpaceGuid.PcdLvglCenteredFrameAspectDen
+  gLvglPkgTokenSpaceGuid.PcdLvglAptioSubtitleShowsDeviceModel

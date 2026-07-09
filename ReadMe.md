@@ -207,6 +207,8 @@ LvglPkg separates **theme** values (rebuild to change) from **platform defaults*
   resolution (useful on HiDPI panels)
 - **Centered aspect-ratio frame** -- optional letterboxed window instead of
   edge-to-edge chrome (useful on ultrawide displays)
+- **Device model in subtitle bar** -- show the front-page device model in the
+  Aptio subtitle bar instead of the scrollable banner area
 
 Settings are stored in the non-volatile `LvglUiScale` variable. A **reboot is
 required** for changes to take effect.
@@ -225,7 +227,7 @@ Declared in `LvglPkg.dec`:
 | `PcdLvglHelpPaneWidthPct` | Help pane width (% of content row) |
 | `PcdLvglAptioHeaderTitle` | Header bar title (left) |
 | `PcdLvglAptioHeaderVendor` | Header bar vendor string (center) |
-| `PcdLvglAptioSubtitleShowsDeviceModel` | Show front-page device model in subtitle bar (`TRUE`) or content area (`FALSE`, default) |
+| `PcdLvglAptioSubtitleShowsDeviceModel` | Default for device model in subtitle bar (`TRUE`) vs content area (`FALSE`); overridable in **Graphical UI Configuration** |
 | `PcdLvglCenteredFrameEnabled` | Enable centered frame by default |
 | `PcdLvglCenteredFrameHeightPct` | Frame height (% of display height) |
 | `PcdLvglCenteredFrameAspectNum` / `Den` | Frame aspect ratio (e.g. 16:9) |

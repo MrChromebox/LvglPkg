@@ -42,6 +42,8 @@ LvglUiConfigSanitize (
   if (Config->CenteredFrameAspectDen == 0) {
     Config->CenteredFrameAspectDen = PcdGet8 (PcdLvglCenteredFrameAspectDen);
   }
+
+  Config->SubtitleShowsDeviceModel = (Config->SubtitleShowsDeviceModel != 0) ? 1 : 0;
 }
 
 VOID
@@ -57,6 +59,7 @@ LvglUiConfigGetDefaults (
   Config->CenteredFrameHeightPct    = PcdGet8 (PcdLvglCenteredFrameHeightPct);
   Config->CenteredFrameAspectNum    = PcdGet8 (PcdLvglCenteredFrameAspectNum);
   Config->CenteredFrameAspectDen    = PcdGet8 (PcdLvglCenteredFrameAspectDen);
+  Config->SubtitleShowsDeviceModel  = PcdGetBool (PcdLvglAptioSubtitleShowsDeviceModel) ? 1 : 0;
 
   LvglUiConfigSanitize (Config);
 }
@@ -125,13 +128,14 @@ LvglUiConfigEnsureVariable (
                   );
   DEBUG ((
     DEBUG_INFO,
-    "LvglUiConfigLib: seeded %s (scale=%u frame=%u %u:%u@%u%%) %r\n",
+    "LvglUiConfigLib: seeded %s (scale=%u frame=%u %u:%u@%u%% subtitle=%u) %r\n",
     LVGL_UI_CONFIG_VAR_NAME,
     Config.UiScale,
     Config.CenteredFrameEnabled,
     Config.CenteredFrameAspectNum,
     Config.CenteredFrameAspectDen,
     Config.CenteredFrameHeightPct,
+    Config.SubtitleShowsDeviceModel,
     Status
     ));
 }

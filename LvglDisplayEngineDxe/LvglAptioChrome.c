@@ -227,14 +227,16 @@ FindCenterBannerUtf8 (
 /**
   Build the subtitle bar.
 
-  When PcdLvglAptioSubtitleShowsDeviceModel is TRUE, the centered front-page
-  banner (device model) is shown here; otherwise the form title is shown.
+  When SubtitleShowsDeviceModel is enabled in Graphical UI Configuration, the
+  centered front-page banner (device model) is shown here; otherwise the form
+  title is shown.
 **/
 STATIC
 VOID
 BuildSubtitleBar (
   IN lv_obj_t                    *Screen,
-  IN FORM_DISPLAY_ENGINE_FORM    *FormData
+  IN FORM_DISPLAY_ENGINE_FORM    *FormData,
+  IN BOOLEAN                     SubtitleShowsDeviceModel
   )
 {
   lv_obj_t  *Bar;
@@ -259,7 +261,7 @@ BuildSubtitleBar (
   Str16 = NULL;
   Utf8  = NULL;
 
-  if (PcdGetBool (PcdLvglAptioSubtitleShowsDeviceModel)) {
+  if (SubtitleShowsDeviceModel) {
     Utf8 = FindCenterBannerUtf8 (FormData);
   }
 
@@ -280,7 +282,7 @@ BuildSubtitleBar (
   lv_obj_set_style_text_color (Label, lv_color_hex (THEME_COLOR_SUBTITLE_TEXT), 0);
   lv_obj_align (
     Label,
-    PcdGetBool (PcdLvglAptioSubtitleShowsDeviceModel) ? LV_ALIGN_CENTER : LV_ALIGN_LEFT_MID,
+    SubtitleShowsDeviceModel ? LV_ALIGN_CENTER : LV_ALIGN_LEFT_MID,
     0,
     0
     );
@@ -524,7 +526,7 @@ AptioBuildChrome (
 
   // Header / subtitle / [content row | help pane] / footer in flex order.
   BuildHeader (ChromeRoot);
-  BuildSubtitleBar (ChromeRoot, FormData);
+  BuildSubtitleBar (ChromeRoot, FormData, (UiConfig.SubtitleShowsDeviceModel != 0));
 
   //
   // Middle band: horizontal flex with rows panel on the left and help pane

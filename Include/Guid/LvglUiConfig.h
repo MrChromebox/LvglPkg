@@ -41,6 +41,7 @@ typedef struct {
   UINT8    CenteredFrameHeightPct;
   UINT8    CenteredFrameAspectNum;
   UINT8    CenteredFrameAspectDen;
+  UINT8    SubtitleShowsDeviceModel;
 } LVGL_UI_CONFIG_VARSTORE_DATA;
 #pragma pack()
 
