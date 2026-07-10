@@ -14,6 +14,7 @@
 #include "LvglFormRenderer.h"
 #include "LvglAptioChrome.h"
 #include <LvglTheme.h>
+#include <Library/LvglUiConfigLib.h>
 #include <Library/PrintLib.h>
 #include <Guid/MdeModuleHii.h>
 
@@ -37,6 +38,11 @@ STATIC UINTN                          mNavCount = 0;
 // to rows in the upper portion of the form.
 //
 STATIC lv_obj_t  *mContentPanel = NULL;
+
+//
+// Loaded from LvglUiScale each FormDisplay(); mirrors SubtitleShowsDeviceModel.
+//
+STATIC BOOLEAN  mSubtitleShowsDeviceModel = FALSE;
 
 //
 // Editable field registry -- commit dirty values when leaving a field via
@@ -2361,9 +2367,11 @@ CreateTextWidget (
 /**
   Render a front-page banner line (device model / BIOS version / CPU / memory /
   battery). These arrive as Tiano GUIDed EFI_IFR_EXTEND_OP_BANNER opcodes, which
-  the text-mode engine drew via CustomizedDisplayLib's PrintBannerInfo(). The
-  centered line (typically the model, LineNumber 1) is emphasized to mimic the
-  classic banner heading.
+  the text-mode engine drew via CustomizedDisplayLib's PrintBannerInfo().
+
+  When SubtitleShowsDeviceModel is enabled in Graphical UI Configuration, the
+  centered line (device model) is shown in the subtitle bar instead and is
+  skipped here.
 **/
 STATIC
 VOID
@@ -2380,6 +2388,12 @@ CreateBannerWidget (
 
   Banner = (EFI_IFR_GUID_BANNER *)Statement->OpCode;
   if (Banner->Title == 0) {
+    return;
+  }
+
+  if (mSubtitleShowsDeviceModel &&
+      (Banner->Alignment == EFI_IFR_BANNER_ALIGN_CENTER))
+  {
     return;
   }
 
@@ -3477,6 +3491,13 @@ LvglRenderForm (
   mBannerCount = 0;
 
   ZeroMem (UserInputData, sizeof (USER_INPUT));
+
+  {
+    LVGL_UI_CONFIG_VARSTORE_DATA  UiConfig;
+
+    LvglUiConfigLoad (&UiConfig);
+    mSubtitleShowsDeviceModel = (UiConfig.SubtitleShowsDeviceModel != 0);
+  }
 
   //
   // Create a new screen and the AMI Aptio-style chrome around it.

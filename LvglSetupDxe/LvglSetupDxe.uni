@@ -34,3 +34,6 @@
 
 #string STR_CENTERED_FRAME_ASPECT_DEN_PROMPT  #language en-US  "Frame Aspect Height"
 #string STR_CENTERED_FRAME_ASPECT_DEN_HELP    #language en-US  "Aspect-ratio denominator. Frame width = height * width / height divisor (for example 16:9)."
+
+#string STR_SUBTITLE_DEVICE_MODEL_PROMPT  #language en-US  "Device Model in Subtitle Bar"
+#string STR_SUBTITLE_DEVICE_MODEL_HELP    #language en-US  "When enabled, the front-page device model is shown in the subtitle bar instead of the scrollable banner area. A reboot is required for a change to take effect."

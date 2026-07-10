@@ -79,6 +79,12 @@ formset
 
     endif;
 
+    checkbox varid = LvglUiScale.SubtitleShowsDeviceModel,
+      prompt = STRING_TOKEN(STR_SUBTITLE_DEVICE_MODEL_PROMPT),
+      help   = STRING_TOKEN(STR_SUBTITLE_DEVICE_MODEL_HELP),
+      flags  = RESET_REQUIRED,
+    endcheckbox;
+
   endform;
 
 endformset;

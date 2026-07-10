@@ -8,6 +8,7 @@
 #include "LvglAptioChrome.h"
 #include <LvglTheme.h>
 #include <Library/BaseLib.h>
+#include <Library/BaseMemoryLib.h>
 #include <Library/DebugLib.h>
 #include <Library/LvglUiConfigLib.h>
 #include <Library/PcdLib.h>
@@ -15,6 +16,7 @@
 #include <Library/HiiLib.h>
 #include <Library/MemoryAllocationLib.h>
 #include <Library/PrintLib.h>
+#include <Guid/MdeModuleHii.h>
 
 STATIC lv_obj_t   *mClockLabel = NULL;
 STATIC lv_timer_t *mClockTimer = NULL;
@@ -149,13 +151,92 @@ BuildHeader (
 }
 
 /**
-  Build the subtitle bar showing the current form's title.
+  Find the centered front-page banner (device model) on this form.
+
+  The VFR `banner ... align center` line (device model, LineNumber 1) arrives
+  as a Tiano GUIDed EFI_IFR_EXTEND_OP_BANNER opcode in the statement list.
+
+  @param[in]  FormData  Current form.
+
+  @return Allocated UTF-8 device-model string (caller frees), or NULL if the
+          form has no centered banner (e.g. any non-front-page form).
+**/
+STATIC
+CHAR8 *
+FindCenterBannerUtf8 (
+  IN FORM_DISPLAY_ENGINE_FORM  *FormData
+  )
+{
+  LIST_ENTRY                     *Link;
+  FORM_DISPLAY_ENGINE_STATEMENT  *Statement;
+  EFI_IFR_GUID_BANNER            *Banner;
+  CHAR16                         *Ucs2;
+  CHAR8                          *Utf8;
+
+  if (FormData == NULL) {
+    return NULL;
+  }
+
+  for (Link = FormData->StatementListHead.ForwardLink;
+       Link != &FormData->StatementListHead;
+       Link = Link->ForwardLink)
+  {
+    Statement = FORM_DISPLAY_ENGINE_STATEMENT_FROM_LINK (Link);
+
+    if (Statement->OpCode->OpCode != EFI_IFR_GUID_OP) {
+      continue;
+    }
+
+    if (!CompareGuid (
+           (EFI_GUID *)((UINT8 *)Statement->OpCode + sizeof (EFI_IFR_OP_HEADER)),
+           &gEfiIfrTianoGuid
+           ))
+    {
+      continue;
+    }
+
+    if (((EFI_IFR_GUID_LABEL *)Statement->OpCode)->ExtendOpCode != EFI_IFR_EXTEND_OP_BANNER) {
+      continue;
+    }
+
+    Banner = (EFI_IFR_GUID_BANNER *)Statement->OpCode;
+    if ((Banner->Alignment != EFI_IFR_BANNER_ALIGN_CENTER) || (Banner->Title == 0)) {
+      continue;
+    }
+
+    Ucs2 = HiiGetString (FormData->HiiHandle, Banner->Title, NULL);
+    if (Ucs2 == NULL) {
+      continue;
+    }
+
+    Utf8 = ChromeUcs2ToUtf8 (Ucs2);
+    FreePool (Ucs2);
+
+    if ((Utf8 != NULL) && (Utf8[0] != '\0')) {
+      return Utf8;
+    }
+
+    if (Utf8 != NULL) {
+      FreePool (Utf8);
+    }
+  }
+
+  return NULL;
+}
+
+/**
+  Build the subtitle bar.
+
+  When SubtitleShowsDeviceModel is enabled in Graphical UI Configuration, the
+  centered front-page banner (device model) is shown here; otherwise the form
+  title is shown.
 **/
 STATIC
 VOID
 BuildSubtitleBar (
   IN lv_obj_t                    *Screen,
-  IN FORM_DISPLAY_ENGINE_FORM    *FormData
+  IN FORM_DISPLAY_ENGINE_FORM    *FormData,
+  IN BOOLEAN                     SubtitleShowsDeviceModel
   )
 {
   lv_obj_t  *Bar;
@@ -179,19 +260,32 @@ BuildSubtitleBar (
 
   Str16 = NULL;
   Utf8  = NULL;
-  if ((FormData != NULL) && (FormData->FormTitle != 0)) {
-    Str16 = HiiGetString (FormData->HiiHandle, FormData->FormTitle, NULL);
+
+  if (SubtitleShowsDeviceModel) {
+    Utf8 = FindCenterBannerUtf8 (FormData);
   }
-  if (Str16 != NULL) {
-    Utf8 = ChromeUcs2ToUtf8 (Str16);
-    FreePool (Str16);
+
+  if (Utf8 == NULL) {
+    if ((FormData != NULL) && (FormData->FormTitle != 0)) {
+      Str16 = HiiGetString (FormData->HiiHandle, FormData->FormTitle, NULL);
+    }
+
+    if (Str16 != NULL) {
+      Utf8 = ChromeUcs2ToUtf8 (Str16);
+      FreePool (Str16);
+    }
   }
 
   Label = lv_label_create (Bar);
   lv_label_set_text (Label, Utf8 != NULL ? Utf8 : "Setup");
   THEME_APPLY_BODY_FONT (Label);
   lv_obj_set_style_text_color (Label, lv_color_hex (THEME_COLOR_SUBTITLE_TEXT), 0);
-  lv_obj_align (Label, LV_ALIGN_LEFT_MID, 0, 0);
+  lv_obj_align (
+    Label,
+    SubtitleShowsDeviceModel ? LV_ALIGN_CENTER : LV_ALIGN_LEFT_MID,
+    0,
+    0
+    );
 
   if (Utf8 != NULL) {
     FreePool (Utf8);
@@ -432,7 +526,7 @@ AptioBuildChrome (
 
   // Header / subtitle / [content row | help pane] / footer in flex order.
   BuildHeader (ChromeRoot);
-  BuildSubtitleBar (ChromeRoot, FormData);
+  BuildSubtitleBar (ChromeRoot, FormData, (UiConfig.SubtitleShowsDeviceModel != 0));
 
   //
   // Middle band: horizontal flex with rows panel on the left and help pane
