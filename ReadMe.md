@@ -103,6 +103,27 @@ handling the built-in drivers don't provide on their own.
 
 Replacing the stock display engine in OVMF takes several coordinated edits.
 
+LvglPkg provides reusable DSC and FDF fragments as an alternative to manually
+adding the package-owned entries described in steps 1-3. After removing the
+stock `DisplayEngineDxe` entries, include the DSC fragment at the top level of
+the platform DSC:
+
+```ini
+!include LvglPkg/Include/Dsc/LvglPkg.dsc.inc
+```
+
+Include the FDF fragment inside the platform's DXE firmware-volume section:
+
+```ini
+!include LvglPkg/Include/Fdf/LvglPkg.fdf.inc
+```
+
+These fragments add `LvglDisplayEngineDxe`, `LvglSetupDxe`, and all three
+LvglPkg library-class mappings. The USB mouse replacement in step 4 remains a
+platform edit because the location of the platform's existing USB component
+lists varies. Do not also add the entries from steps 1-3 manually when using
+the fragments.
+
 ### 1. DSC -- replace the display engine module
 
 In `OvmfPkg/OvmfPkgX64.dsc`, find and remove:
