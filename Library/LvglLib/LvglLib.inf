@@ -530,4 +530,6 @@
 
   MSFT:*_*_*_CC_FLAGS = /GL-
 
-  GCC:*_*_*_CC_FLAGS = -Wno-format
+  # -Wno-unused-but-set-variable: newer GCC (e.g. with -Werror) flags dead assigns in
+  # upstream LVGL (e.g. txt_tot_i in lv_buttonmatrix.c) that we cannot bump yet.
+  GCC:*_*_*_CC_FLAGS = -Wno-format -Wno-unused-but-set-variable
